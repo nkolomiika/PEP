@@ -154,6 +154,16 @@ type BlackBoxAssignment = {
   assignedAt: string;
 };
 
+type LiveStatus = {
+  role: Role;
+  submissions: number;
+  validationJobs: number;
+  runningLabs: number;
+  reports: number;
+  assignments: number;
+  updatedAt: string;
+};
+
 type ApiState = {
   courses: Course[];
   submissions: Submission[];
@@ -197,7 +207,9 @@ const statusLabels: Record<string, string> = {
   IN_PROGRESS: "В работе",
   COMPLETED: "Изучено",
   DOCKER_REQUIRED: "Нужен Docker-допуск",
-  SCORED: "Оценено"
+  SCORED: "Оценено",
+  CONNECTED: "Подключено",
+  DISCONNECTED: "Нет соединения"
 };
 
 const roleLabels: Record<Role, string> = {
@@ -261,6 +273,13 @@ async function downloadText(account: DemoAccount, path: string): Promise<string>
   }
 
   return response.text();
+}
+
+function liveStatusStreamUrl(account: DemoAccount) {
+  const url = new URL("/api/live/status-stream", apiBaseUrl);
+  url.username = account.email;
+  url.password = account.password;
+  return url.toString();
 }
 
 function StatusBadge({ value }: { value: string }) {
@@ -533,6 +552,8 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("Выберите demo-пользователя и загрузите данные.");
   const [error, setError] = useState<string | null>(null);
+  const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
+  const [liveConnected, setLiveConnected] = useState(false);
 
   const moduleOptions = useMemo(
     () =>
@@ -616,6 +637,20 @@ function App() {
 
   useEffect(() => {
     void loadDashboard(account);
+  }, [account]);
+
+  useEffect(() => {
+    const events = new EventSource(liveStatusStreamUrl(account));
+    events.onopen = () => setLiveConnected(true);
+    events.addEventListener("status", (event) => {
+      setLiveStatus(JSON.parse((event as MessageEvent).data) as LiveStatus);
+      setLiveConnected(true);
+    });
+    events.onerror = () => setLiveConnected(false);
+    return () => {
+      events.close();
+      setLiveConnected(false);
+    };
   }, [account]);
 
   async function withRefresh(action: () => Promise<void>, successMessage: string) {
@@ -728,6 +763,8 @@ function App() {
           Обновить данные
         </button>
       </section>
+
+      <LiveStatusCard status={liveStatus} connected={liveConnected} />
 
       {loading && <p className="notice">Загрузка...</p>}
       {error && <p className="notice error">Ошибка: {error}</p>}
@@ -894,6 +931,46 @@ function UserCard({ account }: { account: DemoAccount }) {
         Доступы управляются backend через HTTP Basic и роли `STUDENT`, `CURATOR`, `ADMIN`.
       </p>
     </article>
+  );
+}
+
+function LiveStatusCard({ status, connected }: { status: LiveStatus | null; connected: boolean }) {
+  return (
+    <section className="card live-status">
+      <div>
+        <h2>Live statuses</h2>
+        <p className="muted">
+          SSE: <StatusBadge value={connected ? "CONNECTED" : "DISCONNECTED"} />
+          {status?.updatedAt ? ` обновлено ${new Date(status.updatedAt).toLocaleTimeString("ru-RU")}` : ""}
+        </p>
+      </div>
+      {status ? (
+        <dl className="metrics module-result">
+          <div>
+            <dt>Submissions</dt>
+            <dd>{status.submissions}</dd>
+          </div>
+          <div>
+            <dt>Validation jobs</dt>
+            <dd>{status.validationJobs}</dd>
+          </div>
+          <div>
+            <dt>Reports</dt>
+            <dd>{status.reports}</dd>
+          </div>
+          <div>
+            <dt>Labs running</dt>
+            <dd>{status.runningLabs}</dd>
+          </div>
+          <div>
+            <dt>Assignments</dt>
+            <dd>{status.assignments}</dd>
+          </div>
+        </dl>
+      ) : (
+        <EmptyState>Live snapshot еще не получен.</EmptyState>
+      )}
+    </section>
   );
 }
 

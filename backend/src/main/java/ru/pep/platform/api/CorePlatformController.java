@@ -1,9 +1,11 @@
 package ru.pep.platform.api;
 
 import jakarta.validation.Valid;
+import java.io.IOException;
 import java.security.Principal;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import ru.pep.platform.service.CorePlatformService;
 
 @RestController
@@ -180,5 +183,35 @@ public class CorePlatformController {
     @PreAuthorize("hasRole('ADMIN')")
     public List<CoreDtos.AuditEventResponse> latestAuditEvents() {
         return platform.latestAuditEvents();
+    }
+
+    @GetMapping("/live/status")
+    @PreAuthorize("hasAnyRole('STUDENT','CURATOR','ADMIN')")
+    public CoreDtos.LiveStatusResponse liveStatus(Principal principal) {
+        return platform.liveStatus(principal.getName());
+    }
+
+    @GetMapping(path = "/live/status-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize("hasAnyRole('STUDENT','CURATOR','ADMIN')")
+    public SseEmitter liveStatusStream(Principal principal) {
+        SseEmitter emitter = new SseEmitter(60_000L);
+        String email = principal.getName();
+        CompletableFuture.runAsync(() -> {
+            try {
+                for (int i = 0; i < 30; i++) {
+                    emitter.send(SseEmitter.event()
+                            .name("status")
+                            .data(platform.liveStatus(email)));
+                    Thread.sleep(2_000L);
+                }
+                emitter.complete();
+            } catch (IOException exception) {
+                emitter.completeWithError(exception);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                emitter.completeWithError(exception);
+            }
+        });
+        return emitter;
     }
 }

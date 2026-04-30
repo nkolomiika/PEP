@@ -177,6 +177,21 @@ Response:
 `docker image history`, чтобы подсветить отсутствие SBOM labels и package install commands.
 Полноценный dependency/CVE scanner остается production-ready расширением.
 
+## Live statuses
+
+### `GET /api/live/status`
+
+Роль: студент, куратор или администратор.
+
+Назначение: получить snapshot live-счетчиков для текущей роли.
+
+### `GET /api/live/status-stream`
+
+Роль: студент, куратор или администратор.
+
+Назначение: SSE stream с event `status`, который каждые 2 секунды отправляет тот же payload, что
+`GET /api/live/status`. Demo frontend использует stream для live indicator и счетчиков dashboard.
+
 ## Reviews
 
 ### `GET /api/reviews/queue`

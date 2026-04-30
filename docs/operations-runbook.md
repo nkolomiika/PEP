@@ -149,6 +149,15 @@ http://localhost:18080
 Invoke-WebRequest http://localhost:18080/health
 ```
 
+## Live statuses
+
+Frontend открывает SSE stream `/api/live/status-stream` и показывает live card над dashboard.
+Если SSE недоступен, можно проверить snapshot endpoint вручную:
+
+```powershell
+Invoke-WebRequest http://localhost:8080/api/live/status -Headers @{ Authorization = "Basic <base64>" }
+```
+
 ## Что показать комиссии
 
 - UI студента с Docker-курсом и модулем `A03. Injection`.

@@ -83,6 +83,11 @@ Admin dashboard показывает количество approved submissions, 
 - Куратор видит список вложений, приложенных к отчету.
 - Очередь куратора фильтруется по статусу, типу отчета и email автора.
 
+## Live Statuses
+
+- Общий dashboard подключается к SSE `/api/live/status-stream`.
+- Live card показывает состояние SSE connection и счетчики submissions, validation jobs, reports, labs и assignments.
+
 ## Acceptance criteria
 
 - Все P0 user stories имеют route.

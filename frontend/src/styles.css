@@ -125,6 +125,10 @@ pre {
   flex: 1;
 }
 
+.live-status {
+  margin: 24px 0;
+}
+
 .filter-panel {
   display: grid;
   gap: 12px;

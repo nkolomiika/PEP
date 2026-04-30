@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,6 +20,7 @@ import ru.pep.platform.domain.Course;
 import ru.pep.platform.domain.LearningModule;
 import ru.pep.platform.domain.Lesson;
 import ru.pep.platform.domain.LessonProgress;
+import ru.pep.platform.domain.LabStatus;
 import ru.pep.platform.domain.Report;
 import ru.pep.platform.domain.ReportAttachment;
 import ru.pep.platform.domain.Review;
@@ -426,6 +428,29 @@ public class CorePlatformService {
                         event.getMetadataJson(),
                         event.getCreatedAt()))
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public CoreDtos.LiveStatusResponse liveStatus(String email) {
+        AppUser user = currentUser(email);
+        int submissionCount = user.getRole() == Role.STUDENT ? submissions.findByStudent(user).size() : submissions.findAll().size();
+        int validationJobCount = validationJobs.findAll().stream()
+                .filter(job -> user.getRole() != Role.STUDENT || job.getSubmission().getStudent().getId().equals(user.getId()))
+                .toList()
+                .size();
+        int reportCount = user.getRole() == Role.STUDENT ? reports.findByAuthor(user).size() : reports.findAll().size();
+        int assignmentCount = user.getRole() == Role.STUDENT ? assignments.findByStudent(user).size() : 0;
+        int runningLabCount = user.getRole() == Role.STUDENT
+                ? 0
+                : (int) labs.findAll().stream().filter(lab -> lab.getStatus() == LabStatus.RUNNING).count();
+        return new CoreDtos.LiveStatusResponse(
+                user.getRole().name(),
+                submissionCount,
+                validationJobCount,
+                runningLabCount,
+                reportCount,
+                assignmentCount,
+                OffsetDateTime.now());
     }
 
     private AppUser currentUser(String email) {

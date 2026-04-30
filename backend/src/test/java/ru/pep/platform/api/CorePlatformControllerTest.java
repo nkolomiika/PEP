@@ -284,6 +284,14 @@ class CorePlatformControllerTest {
                 .andExpect(content().string(containsString("\"student2@pep.local\"")))
                 .andExpect(content().string(containsString("false,,80,,\"DOCKER_REQUIRED\"")));
 
+        mockMvc.perform(get("/api/live/status")
+                        .with(httpBasic("curator@pep.local", "curator")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").value("CURATOR"))
+                .andExpect(jsonPath("$.submissions").value(1))
+                .andExpect(jsonPath("$.validationJobs").value(1))
+                .andExpect(jsonPath("$.reports").value(2));
+
         mockMvc.perform(get("/api/audit")
                         .with(httpBasic("admin@pep.local", "admin")))
                 .andExpect(status().isOk());

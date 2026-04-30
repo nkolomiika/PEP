@@ -144,6 +144,16 @@ public final class CoreDtos {
             OffsetDateTime createdAt) {
     }
 
+    public record LiveStatusResponse(
+            String role,
+            Integer submissions,
+            Integer validationJobs,
+            Integer runningLabs,
+            Integer reports,
+            Integer assignments,
+            OffsetDateTime updatedAt) {
+    }
+
     public record CreateLabRequest(@NotNull UUID submissionId) {
     }
 
