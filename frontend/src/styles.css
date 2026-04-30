@@ -190,6 +190,15 @@ pre {
   gap: 10px;
 }
 
+.progress-line {
+  background: #ecfdf5;
+  border: 1px solid #86efac;
+  border-radius: 14px;
+  color: #166534;
+  font-weight: 700;
+  padding: 10px 12px;
+}
+
 .lesson-item {
   background: #f1f5f9;
   border: 1px solid #cbd5e1;

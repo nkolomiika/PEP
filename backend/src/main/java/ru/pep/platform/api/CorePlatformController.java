@@ -40,6 +40,18 @@ public class CorePlatformController {
         return platform.getLesson(lessonId);
     }
 
+    @GetMapping("/modules/{moduleId}/lesson-progress")
+    @PreAuthorize("hasRole('STUDENT')")
+    public List<CoreDtos.LessonProgressResponse> listLessonProgress(Principal principal, @PathVariable UUID moduleId) {
+        return platform.listLessonProgress(principal.getName(), moduleId);
+    }
+
+    @PostMapping("/lessons/{lessonId}/complete")
+    @PreAuthorize("hasRole('STUDENT')")
+    public CoreDtos.LessonProgressResponse completeLesson(Principal principal, @PathVariable UUID lessonId) {
+        return platform.completeLesson(principal.getName(), lessonId);
+    }
+
     @PostMapping("/submissions")
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('STUDENT')")

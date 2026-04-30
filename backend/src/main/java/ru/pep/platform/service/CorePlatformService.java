@@ -11,6 +11,7 @@ import ru.pep.platform.domain.LabInstance;
 import ru.pep.platform.domain.Course;
 import ru.pep.platform.domain.LearningModule;
 import ru.pep.platform.domain.Lesson;
+import ru.pep.platform.domain.LessonProgress;
 import ru.pep.platform.domain.Report;
 import ru.pep.platform.domain.Review;
 import ru.pep.platform.domain.Role;
@@ -22,6 +23,7 @@ import ru.pep.platform.repository.BlackBoxAssignmentRepository;
 import ru.pep.platform.repository.CourseRepository;
 import ru.pep.platform.repository.LabInstanceRepository;
 import ru.pep.platform.repository.LearningModuleRepository;
+import ru.pep.platform.repository.LessonProgressRepository;
 import ru.pep.platform.repository.LessonRepository;
 import ru.pep.platform.repository.ReportRepository;
 import ru.pep.platform.repository.ReviewRepository;
@@ -41,6 +43,7 @@ public class CorePlatformService {
     private final LabInstanceRepository labs;
     private final BlackBoxAssignmentRepository assignments;
     private final LessonRepository lessons;
+    private final LessonProgressRepository lessonProgress;
     private final AuditService audit;
 
     public CorePlatformService(
@@ -54,6 +57,7 @@ public class CorePlatformService {
             LabInstanceRepository labs,
             BlackBoxAssignmentRepository assignments,
             LessonRepository lessons,
+            LessonProgressRepository lessonProgress,
             AuditService audit) {
         this.users = users;
         this.courses = courses;
@@ -65,6 +69,7 @@ public class CorePlatformService {
         this.labs = labs;
         this.assignments = assignments;
         this.lessons = lessons;
+        this.lessonProgress = lessonProgress;
         this.audit = audit;
     }
 
@@ -98,6 +103,35 @@ public class CorePlatformService {
                 lesson.getTitle(),
                 lesson.getContentMarkdown(),
                 lesson.getPosition());
+    }
+
+    @Transactional(readOnly = true)
+    public List<CoreDtos.LessonProgressResponse> listLessonProgress(String email, UUID moduleId) {
+        AppUser student = currentUser(email);
+        if (student.getRole() != Role.STUDENT) {
+            throw new AccessDeniedException("Progress доступен только студенту");
+        }
+        if (!modules.existsById(moduleId)) {
+            throw new NotFoundException("Модуль не найден");
+        }
+        return lessonProgress.findModuleProgress(student.getId(), moduleId).stream()
+                .map(this::toLessonProgressResponse)
+                .toList();
+    }
+
+    @Transactional
+    public CoreDtos.LessonProgressResponse completeLesson(String email, UUID lessonId) {
+        AppUser student = currentUser(email);
+        if (student.getRole() != Role.STUDENT) {
+            throw new AccessDeniedException("Только студент может отмечать уроки");
+        }
+        Lesson lesson = lessons.findById(lessonId)
+                .filter(Lesson::getPublished)
+                .orElseThrow(() -> new NotFoundException("Урок не найден"));
+        LessonProgress progress = lessonProgress.findByStudentAndLesson(student, lesson)
+                .orElseGet(() -> lessonProgress.save(new LessonProgress(student, lesson)));
+        audit.record(student, "LESSON_COMPLETED", "Lesson", lesson.getId(), "{}");
+        return toLessonProgressResponse(progress);
     }
 
     @Transactional
@@ -326,6 +360,13 @@ public class CorePlatformService {
                 submission.getApplicationPort(),
                 submission.getHealthPath(),
                 submission.getStatus());
+    }
+
+    private CoreDtos.LessonProgressResponse toLessonProgressResponse(LessonProgress progress) {
+        return new CoreDtos.LessonProgressResponse(
+                progress.getLesson().getId(),
+                true,
+                progress.getCompletedAt());
     }
 
     private CoreDtos.ValidationJobResponse toValidationJobResponse(ValidationJob job) {

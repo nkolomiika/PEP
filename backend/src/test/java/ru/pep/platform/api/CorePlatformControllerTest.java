@@ -51,6 +51,18 @@ class CorePlatformControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Docker image для сдачи на платформе"));
 
+        mockMvc.perform(post("/api/lessons/{lessonId}/complete", lessonId)
+                        .with(httpBasic("student1@pep.local", "student")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lessonId").value(lessonId))
+                .andExpect(jsonPath("$.completed").value(true));
+
+        mockMvc.perform(get("/api/modules/{moduleId}/lesson-progress", moduleId)
+                        .with(httpBasic("student1@pep.local", "student")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].lessonId").value(lessonId));
+
         MvcResult submissionResult = mockMvc.perform(post("/api/submissions")
                         .with(httpBasic("student1@pep.local", "student"))
                         .contentType(MediaType.APPLICATION_JSON)

@@ -76,6 +76,18 @@ Response:
 
 Назначение: открыть урок с Markdown-контентом и примерами кода.
 
+### `GET /api/modules/{moduleId}/lesson-progress`
+
+Роль: студент.
+
+Назначение: получить progress студента по урокам модуля.
+
+### `POST /api/lessons/{lessonId}/complete`
+
+Роль: студент.
+
+Назначение: отметить урок как изученный.
+
 ## Submissions
 
 ### `POST /api/submissions`

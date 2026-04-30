@@ -39,6 +39,9 @@ public final class CoreDtos {
     public record LessonResponse(UUID id, UUID moduleId, String title, String contentMarkdown, Integer position) {
     }
 
+    public record LessonProgressResponse(UUID lessonId, boolean completed, OffsetDateTime completedAt) {
+    }
+
     public record CreateSubmissionRequest(
             @NotNull UUID moduleId,
             @NotBlank String imageReference,

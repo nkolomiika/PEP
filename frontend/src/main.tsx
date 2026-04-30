@@ -43,6 +43,12 @@ type Lesson = {
   position: number;
 };
 
+type LessonProgress = {
+  lessonId: string;
+  completed: boolean;
+  completedAt: string;
+};
+
 type Submission = {
   id: string;
   moduleId: string;
@@ -114,6 +120,7 @@ type ApiState = {
   reports: Report[];
   lessons: LessonSummary[];
   selectedLesson?: Lesson;
+  lessonProgress: LessonProgress[];
   labs: Lab[];
   assignments: BlackBoxAssignment[];
   auditEvents: AuditEvent[];
@@ -143,6 +150,7 @@ const statusLabels: Record<string, string> = {
   RUNNING: "Запущен",
   ASSIGNED: "Назначено",
   IN_PROGRESS: "В работе",
+  COMPLETED: "Изучено",
   SCORED: "Оценено"
 };
 
@@ -191,6 +199,7 @@ function App() {
     reports: [],
     lessons: [],
     selectedLesson: undefined,
+    lessonProgress: [],
     labs: [],
     assignments: [],
     auditEvents: []
@@ -218,6 +227,10 @@ function App() {
       const selectedLesson = lessons[0]
         ? await apiRequest<Lesson>(activeAccount, `/api/lessons/${lessons[0].id}`)
         : undefined;
+      const lessonProgress =
+        activeAccount.role === "STUDENT" && firstLoadedModule
+          ? await apiRequest<LessonProgress[]>(activeAccount, `/api/modules/${firstLoadedModule.id}/lesson-progress`)
+          : [];
       const labs =
         activeAccount.role === "ADMIN" || activeAccount.role === "CURATOR"
           ? await apiRequest<Lab[]>(activeAccount, "/api/labs")
@@ -228,7 +241,18 @@ function App() {
           : [];
       const auditEvents =
         activeAccount.role === "ADMIN" ? await apiRequest<AuditEvent[]>(activeAccount, "/api/audit") : [];
-      setState({ courses, submissions, validationJobs, reports, lessons, selectedLesson, labs, assignments, auditEvents });
+      setState({
+        courses,
+        submissions,
+        validationJobs,
+        reports,
+        lessons,
+        selectedLesson,
+        lessonProgress,
+        labs,
+        assignments,
+        auditEvents
+      });
       setMessage("Данные загружены.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось загрузить данные.");
@@ -319,6 +343,7 @@ function App() {
           firstModule={firstModule}
           lessons={state.lessons}
           selectedLesson={state.selectedLesson}
+          lessonProgress={state.lessonProgress}
           submissions={state.submissions}
           validationJobs={state.validationJobs}
           reports={state.reports}
@@ -334,6 +359,15 @@ function App() {
             )
           }
           onSelectLesson={openLesson}
+          onCompleteLesson={(lessonId) =>
+            withRefresh(
+              () =>
+                apiRequest(account, `/api/lessons/${lessonId}/complete`, {
+                  method: "POST"
+                }),
+              "Урок отмечен как изученный."
+            )
+          }
           onCreateReport={(payload) =>
             withRefresh(
               () =>
@@ -454,17 +488,20 @@ function StudentDashboard({
   firstModule,
   lessons,
   selectedLesson,
+  lessonProgress,
   submissions,
   validationJobs,
   reports,
   assignments,
   onCreateSubmission,
   onSelectLesson,
+  onCompleteLesson,
   onCreateReport
 }: {
   firstModule?: LearningModule;
   lessons: LessonSummary[];
   selectedLesson?: Lesson;
+  lessonProgress: LessonProgress[];
   submissions: Submission[];
   validationJobs: ValidationJob[];
   reports: Report[];
@@ -476,6 +513,7 @@ function StudentDashboard({
     healthPath: string;
   }) => Promise<void>;
   onSelectLesson: (lessonId: string) => Promise<void>;
+  onCompleteLesson: (lessonId: string) => Promise<void>;
   onCreateReport: (payload: {
     moduleId: string;
     submissionId?: string;
@@ -491,6 +529,11 @@ function StudentDashboard({
     "Target: назначенный lab\nPayload: ' OR '1'='1\nEvidence: результат поиска раскрывает лишние данные."
   );
   const latestSubmission = submissions[0];
+  const completedLessonIds = useMemo(
+    () => new Set(lessonProgress.filter((item) => item.completed).map((item) => item.lessonId)),
+    [lessonProgress]
+  );
+  const selectedLessonCompleted = selectedLesson ? completedLessonIds.has(selectedLesson.id) : false;
 
   return (
     <section className="grid">
@@ -503,6 +546,9 @@ function StudentDashboard({
             <p className="muted">
               {firstModule.title}: {firstModule.vulnerabilityTopic}
             </p>
+            <p className="progress-line">
+              Изучено: {completedLessonIds.size} из {lessons.length}
+            </p>
             <div className="lesson-layout">
               <div className="lesson-list" aria-label="Список уроков">
                 {lessons.map((lesson) => (
@@ -512,6 +558,7 @@ function StudentDashboard({
                     className={lesson.id === selectedLesson?.id ? "lesson-item active" : "lesson-item"}
                     onClick={() => void onSelectLesson(lesson.id)}
                   >
+                    {completedLessonIds.has(lesson.id) ? "✓ " : ""}
                     {lesson.position}. {lesson.title}
                   </button>
                 ))}
@@ -520,7 +567,13 @@ function StudentDashboard({
                 {selectedLesson ? (
                   <>
                     <h3>{selectedLesson.title}</h3>
+                    <StatusBadge value={selectedLessonCompleted ? "COMPLETED" : "IN_PROGRESS"} />
                     <pre>{selectedLesson.contentMarkdown}</pre>
+                    {!selectedLessonCompleted && (
+                      <button type="button" onClick={() => void onCompleteLesson(selectedLesson.id)}>
+                        Отметить урок как изученный
+                      </button>
+                    )}
                   </>
                 ) : (
                   <EmptyState>Материалы пока не опубликованы.</EmptyState>
