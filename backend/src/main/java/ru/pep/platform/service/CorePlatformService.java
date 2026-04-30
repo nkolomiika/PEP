@@ -244,6 +244,13 @@ public class CorePlatformService {
         return toReviewResponse(review);
     }
 
+    @Transactional(readOnly = true)
+    public List<CoreDtos.ReviewResponse> listReviews(String email) {
+        AppUser user = currentUser(email);
+        List<Review> result = user.getRole() == Role.STUDENT ? reviews.findByReportAuthor(user) : reviews.findAll();
+        return result.stream().map(this::toReviewResponse).toList();
+    }
+
     @Transactional
     public CoreDtos.LabResponse createLab(String email, CoreDtos.CreateLabRequest request) {
         AppUser actor = currentUser(email);

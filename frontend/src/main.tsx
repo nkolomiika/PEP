@@ -84,6 +84,15 @@ type Report = {
   status: string;
 };
 
+type Review = {
+  id: string;
+  reportId: string;
+  curatorEmail: string;
+  decision: ReviewDecision;
+  score: number;
+  commentMarkdown: string;
+};
+
 type AuditEvent = {
   id: string;
   actorEmail?: string;
@@ -122,6 +131,7 @@ type ApiState = {
   submissions: Submission[];
   validationJobs: ValidationJob[];
   reports: Report[];
+  reviews: Review[];
   lessons: LessonSummary[];
   selectedLesson?: Lesson;
   lessonProgress: LessonProgress[];
@@ -202,6 +212,7 @@ function App() {
     submissions: [],
     validationJobs: [],
     reports: [],
+    reviews: [],
     lessons: [],
     selectedLesson: undefined,
     lessonProgress: [],
@@ -237,11 +248,12 @@ function App() {
     setLoading(true);
     setError(null);
     try {
-      const [courses, submissions, validationJobs, reports] = await Promise.all([
+      const [courses, submissions, validationJobs, reports, reviews] = await Promise.all([
         apiRequest<Course[]>(activeAccount, "/api/courses"),
         apiRequest<Submission[]>(activeAccount, "/api/submissions"),
         apiRequest<ValidationJob[]>(activeAccount, "/api/validation-jobs"),
-        apiRequest<Report[]>(activeAccount, "/api/reports")
+        apiRequest<Report[]>(activeAccount, "/api/reports"),
+        apiRequest<Review[]>(activeAccount, "/api/reviews")
       ]);
       const loadedModules = courses.flatMap((course) => course.modules);
       const nextSelectedModule =
@@ -271,6 +283,7 @@ function App() {
         submissions,
         validationJobs,
         reports,
+        reviews,
         lessons,
         selectedLesson,
         lessonProgress,
@@ -399,6 +412,7 @@ function App() {
           submissions={state.submissions}
           validationJobs={state.validationJobs}
           reports={state.reports}
+          reviews={state.reviews}
           assignments={state.assignments}
           onSelectModule={selectModule}
           onCreateSubmission={(payload) =>
@@ -546,6 +560,7 @@ function StudentDashboard({
   submissions,
   validationJobs,
   reports,
+  reviews,
   assignments,
   onSelectModule,
   onCreateSubmission,
@@ -561,6 +576,7 @@ function StudentDashboard({
   submissions: Submission[];
   validationJobs: ValidationJob[];
   reports: Report[];
+  reviews: Review[];
   assignments: BlackBoxAssignment[];
   onSelectModule: (moduleId: string) => Promise<void>;
   onCreateSubmission: (payload: {
@@ -589,6 +605,10 @@ function StudentDashboard({
   const completedLessonIds = useMemo(
     () => new Set(lessonProgress.filter((item) => item.completed).map((item) => item.lessonId)),
     [lessonProgress]
+  );
+  const reviewsByReportId = useMemo(
+    () => new Map(reviews.map((review) => [review.reportId, review])),
+    [reviews]
   );
   const selectedLessonCompleted = selectedLesson ? completedLessonIds.has(selectedLesson.id) : false;
 
@@ -738,6 +758,18 @@ function StudentDashboard({
             <>
               <strong>{report.title}</strong>
               <StatusBadge value={report.status} />
+              {reviewsByReportId.has(report.id) ? (
+                <div className="review-box feedback-box">
+                  <strong>Feedback куратора</strong>
+                  <p>
+                    Решение: <StatusBadge value={reviewsByReportId.get(report.id)!.decision} />
+                  </p>
+                  <p className="big">{reviewsByReportId.get(report.id)!.score}/100</p>
+                  <pre>{reviewsByReportId.get(report.id)!.commentMarkdown}</pre>
+                </div>
+              ) : (
+                <p className="muted">Feedback еще не получен.</p>
+              )}
             </>
           )}
         />

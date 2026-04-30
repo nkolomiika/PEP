@@ -112,6 +112,12 @@ public class CorePlatformController {
         return platform.createReview(principal.getName(), request);
     }
 
+    @GetMapping("/reviews")
+    @PreAuthorize("hasAnyRole('STUDENT','CURATOR','ADMIN')")
+    public List<CoreDtos.ReviewResponse> listReviews(Principal principal) {
+        return platform.listReviews(principal.getName());
+    }
+
     @PostMapping("/labs")
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('ADMIN')")

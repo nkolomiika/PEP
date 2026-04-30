@@ -179,6 +179,14 @@ pre {
   padding-top: 12px;
 }
 
+.feedback-box {
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
 .lesson-layout {
   display: grid;
   gap: 16px;

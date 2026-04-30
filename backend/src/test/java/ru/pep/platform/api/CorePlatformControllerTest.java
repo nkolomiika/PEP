@@ -148,6 +148,19 @@ class CorePlatformControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.decision").value("APPROVED"));
 
+        mockMvc.perform(get("/api/reviews")
+                        .with(httpBasic("student1@pep.local", "student")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].reportId").value(reportId))
+                .andExpect(jsonPath("$[0].score").value(90))
+                .andExpect(jsonPath("$[0].commentMarkdown").value("Уязвимость воспроизводится."));
+
+        mockMvc.perform(get("/api/reviews")
+                        .with(httpBasic("student2@pep.local", "student")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+
         MvcResult labResult = mockMvc.perform(post("/api/labs")
                         .with(httpBasic("admin@pep.local", "admin"))
                         .contentType(MediaType.APPLICATION_JSON)
