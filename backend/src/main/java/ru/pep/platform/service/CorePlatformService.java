@@ -451,15 +451,22 @@ public class CorePlatformService {
     }
 
     private CoreDtos.LabResponse toLabResponse(LabInstance lab) {
+        Submission submission = lab.getSubmission();
+        String deployCommand = "docker compose exec k8s-toolbox pep-lab-deploy "
+                + submission.getId() + " " + submission.getImageReference() + " " + submission.getApplicationPort();
+        String portForwardCommand = "docker compose exec k8s-toolbox pep-lab-forward "
+                + submission.getId() + " " + submission.getApplicationPort() + " 18080";
         return new CoreDtos.LabResponse(
                 lab.getId(),
-                lab.getSubmission().getId(),
-                lab.getSubmission().getStudent().getEmail(),
-                lab.getSubmission().getImageReference(),
+                submission.getId(),
+                submission.getStudent().getEmail(),
+                submission.getImageReference(),
                 lab.getNamespace(),
                 lab.getDeploymentName(),
                 lab.getServiceName(),
                 lab.getRouteUrl(),
+                deployCommand,
+                portForwardCommand,
                 lab.getStatus(),
                 lab.getExpiresAt());
     }

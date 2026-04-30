@@ -121,6 +121,8 @@ type Lab = {
   deploymentName: string;
   serviceName: string;
   routeUrl: string;
+  deployCommand: string;
+  portForwardCommand: string;
   status: string;
   expiresAt: string;
 };
@@ -1047,6 +1049,10 @@ function AdminDashboard({
               <p className="muted">
                 {lab.namespace} / {lab.serviceName}
               </p>
+              <p className="muted">Deploy в kind:</p>
+              <code>{lab.deployCommand}</code>
+              <p className="muted">Port-forward:</p>
+              <code>{lab.portForwardCommand}</code>
             </>
           )}
         />

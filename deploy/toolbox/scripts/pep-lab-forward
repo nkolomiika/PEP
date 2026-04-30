@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$#" -lt 2 ]; then
+  echo "Usage: pep-lab-forward <submission-id> <application-port> [local-port]" >&2
+  exit 1
+fi
+
+LAB_ID="$1"
+APPLICATION_PORT="$2"
+LOCAL_PORT="${3:-18080}"
+
+SAFE_ID="$(printf '%s' "${LAB_ID}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | cut -c1-8)"
+NAMESPACE="pep-lab-${SAFE_ID}"
+SERVICE_NAME="svc-${SAFE_ID}"
+
+kubectl port-forward --address 0.0.0.0 -n "${NAMESPACE}" "service/${SERVICE_NAME}" "${LOCAL_PORT}:${APPLICATION_PORT}"

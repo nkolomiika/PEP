@@ -201,6 +201,22 @@ Request:
 
 Назначение: создать lab instance для approved submission.
 
+Response включает Kubernetes metadata и demo-команды:
+
+```json
+{
+  "id": "uuid",
+  "submissionId": "uuid",
+  "namespace": "pep-lab-12345678",
+  "deploymentName": "lab-12345678",
+  "serviceName": "svc-12345678",
+  "routeUrl": "http://localhost:18080",
+  "deployCommand": "docker compose exec k8s-toolbox pep-lab-deploy <submissionId> <image> <port>",
+  "portForwardCommand": "docker compose exec k8s-toolbox pep-lab-forward <submissionId> <port> 18080",
+  "status": "RUNNING"
+}
+```
+
 ### `GET /api/labs/{labId}`
 
 Назначение: получить статус lab instance.

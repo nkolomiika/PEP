@@ -79,18 +79,30 @@ Invoke-WebRequest "http://localhost:8081/search?q=' OR '1'='1"
 docker compose exec k8s-toolbox docker rm -f pep-vuln-smoke
 ```
 
-## Запуск lab manifests
+## Запуск lab из backend metadata
 
 ```powershell
-docker compose exec k8s-toolbox pep-kind-apply
+docker compose exec k8s-toolbox pep-lab-deploy <submissionId> localhost:5001/vulnerable-sqli-demo:latest 8080
 ```
 
-Ожидаемый результат: lab pod находится в состоянии `Running`.
+`submissionId` берется из ответа `POST /api/labs` или из команды `deployCommand`, которую показывает
+Admin dashboard. Script преобразует `localhost:5001/...` в internal registry reference
+`pep-local-registry:5000/...`, создает namespace `pep-lab-<submissionId-prefix>`, deployment,
+service, resource quota и limits.
+
+Ожидаемый результат: lab pod находится в состоянии `Running`, а `kubectl get pods,svc -n
+pep-lab-<submissionId-prefix>` показывает deployment и service.
+
+Для удаления lab:
+
+```powershell
+docker compose exec k8s-toolbox pep-lab-delete <submissionId>
+```
 
 ## Открытие lab
 
 ```powershell
-docker compose exec k8s-toolbox kubectl port-forward --address 0.0.0.0 -n pep-labs-example service/sample-student-lab 18080:8080
+docker compose exec k8s-toolbox pep-lab-forward <submissionId> 8080 18080
 ```
 
 Открыть:

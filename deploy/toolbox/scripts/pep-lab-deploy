@@ -1,0 +1,134 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$#" -lt 3 ]; then
+  echo "Usage: pep-lab-deploy <submission-id> <image-reference> <application-port>" >&2
+  exit 1
+fi
+
+LAB_ID="$1"
+IMAGE_REFERENCE="$2"
+APPLICATION_PORT="$3"
+
+SAFE_ID="$(printf '%s' "${LAB_ID}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | cut -c1-8)"
+NAMESPACE="pep-lab-${SAFE_ID}"
+APP_NAME="lab-${SAFE_ID}"
+SERVICE_NAME="svc-${SAFE_ID}"
+
+RUNTIME_IMAGE="${IMAGE_REFERENCE}"
+case "${RUNTIME_IMAGE}" in
+  localhost:5001/*)
+    RUNTIME_IMAGE="pep-local-registry:5000/${RUNTIME_IMAGE#localhost:5001/}"
+    ;;
+esac
+
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${NAMESPACE}
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: lab-quota
+  namespace: ${NAMESPACE}
+spec:
+  hard:
+    requests.cpu: "1"
+    requests.memory: 1Gi
+    limits.cpu: "2"
+    limits.memory: 2Gi
+    pods: "4"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: lab-limits
+  namespace: ${NAMESPACE}
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${APP_NAME}
+  namespace: ${NAMESPACE}
+  labels:
+    pep.dev/workload: lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${APP_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${APP_NAME}
+        pep.dev/workload: lab
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: ${RUNTIME_IMAGE}
+          ports:
+            - containerPort: ${APPLICATION_PORT}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${SERVICE_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    app: ${APP_NAME}
+  ports:
+    - port: ${APPLICATION_PORT}
+      targetPort: ${APPLICATION_PORT}
+EOF
+
+kubectl rollout status "deployment/${APP_NAME}" -n "${NAMESPACE}" --timeout=120s
+kubectl get pods,svc -n "${NAMESPACE}"
+
+cat <<EOF
+Lab deployed.
+Namespace: ${NAMESPACE}
+Deployment: ${APP_NAME}
+Service: ${SERVICE_NAME}
+Port-forward:
+kubectl port-forward --address 0.0.0.0 -n ${NAMESPACE} service/${SERVICE_NAME} 18080:${APPLICATION_PORT}
+EOF

@@ -127,16 +127,16 @@ docker compose exec k8s-toolbox docker tag vulnerable-sqli-demo:latest localhost
 docker compose exec k8s-toolbox docker push localhost:5001/vulnerable-sqli-demo:latest
 ```
 
-Применить baseline-манифесты лабораторий:
+Развернуть lab для принятой submission:
 
 ```powershell
-docker compose exec k8s-toolbox pep-kind-apply
+docker compose exec k8s-toolbox pep-lab-deploy <submissionId> localhost:5001/vulnerable-sqli-demo:latest 8080
 ```
 
-Открыть пример lab через port-forward:
+Открыть lab через port-forward:
 
 ```powershell
-docker compose exec k8s-toolbox kubectl port-forward --address 0.0.0.0 -n pep-labs-example service/sample-student-lab 18080:8080
+docker compose exec k8s-toolbox pep-lab-forward <submissionId> 8080 18080
 ```
 
 Подробный сценарий описан в `docs/local-kind.md`.

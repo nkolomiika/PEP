@@ -111,18 +111,22 @@ pep-local-registry:5000/vulnerable-sqli-demo:latest
 
 Backend может хранить исходный user-facing reference и internal runtime reference отдельно.
 
-## Применение Kubernetes manifests
+## Запуск lab instance
 
 ```powershell
-docker compose exec k8s-toolbox pep-kind-apply
+docker compose exec k8s-toolbox pep-lab-deploy <submissionId> localhost:5001/vulnerable-sqli-demo:latest 8080
 ```
+
+`pep-lab-deploy` создает isolated namespace, quota, limits, deployment и service для конкретной
+submission. Для images из local registry script автоматически заменяет user-facing reference
+`localhost:5001/...` на internal reference `pep-local-registry:5000/...`, доступный из `kind`.
 
 Проверка lab namespace:
 
 ```powershell
 docker compose exec k8s-toolbox kubectl get ns
-docker compose exec k8s-toolbox kubectl get resourcequota -n pep-labs-example
-docker compose exec k8s-toolbox kubectl get networkpolicy -n pep-labs-example
+docker compose exec k8s-toolbox kubectl get resourcequota -n pep-lab-<submissionId-prefix>
+docker compose exec k8s-toolbox kubectl get pods,svc -n pep-lab-<submissionId-prefix>
 ```
 
 ## Доступ к lab
@@ -130,7 +134,7 @@ docker compose exec k8s-toolbox kubectl get networkpolicy -n pep-labs-example
 Для MVP достаточно port-forward:
 
 ```powershell
-docker compose exec k8s-toolbox kubectl port-forward --address 0.0.0.0 -n pep-labs-example service/sample-student-lab 18080:8080
+docker compose exec k8s-toolbox pep-lab-forward <submissionId> 8080 18080
 ```
 
 После этого lab открывается по адресу:

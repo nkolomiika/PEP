@@ -22,10 +22,11 @@ docker compose exec k8s-toolbox kubectl cluster-info
 docker compose exec k8s-toolbox kubectl get nodes
 ```
 
-## Применение baseline-манифестов
+## Развертывание lab instance
 
 ```powershell
-docker compose exec k8s-toolbox pep-kind-apply
+docker compose exec k8s-toolbox pep-lab-deploy <submissionId> localhost:5001/vulnerable-sqli-demo:latest 8080
+docker compose exec k8s-toolbox pep-lab-forward <submissionId> 8080 18080
 ```
 
 ## Удаление кластера

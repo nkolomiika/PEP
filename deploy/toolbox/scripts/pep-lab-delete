@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$#" -lt 1 ]; then
+  echo "Usage: pep-lab-delete <submission-id>" >&2
+  exit 1
+fi
+
+LAB_ID="$1"
+SAFE_ID="$(printf '%s' "${LAB_ID}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | cut -c1-8)"
+NAMESPACE="pep-lab-${SAFE_ID}"
+
+kubectl delete namespace "${NAMESPACE}" --ignore-not-found=true
