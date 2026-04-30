@@ -1,0 +1,107 @@
+package ru.pep.platform.api;
+
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.UUID;
+import ru.pep.platform.domain.CourseStatus;
+import ru.pep.platform.domain.ModuleStatus;
+import ru.pep.platform.domain.ReportStatus;
+import ru.pep.platform.domain.ReportType;
+import ru.pep.platform.domain.ReviewDecision;
+import ru.pep.platform.domain.SubmissionStatus;
+import ru.pep.platform.domain.ValidationJobStatus;
+
+public final class CoreDtos {
+
+    private CoreDtos() {
+    }
+
+    public record CourseResponse(
+            UUID id,
+            String title,
+            String description,
+            CourseStatus status,
+            List<ModuleResponse> modules) {
+    }
+
+    public record ModuleResponse(UUID id, String title, String vulnerabilityTopic, ModuleStatus status) {
+    }
+
+    public record CreateSubmissionRequest(
+            @NotNull UUID moduleId,
+            @NotBlank String imageReference,
+            @NotNull @Min(1) @Max(65535) Integer applicationPort,
+            String healthPath) {
+    }
+
+    public record SubmissionResponse(
+            UUID id,
+            UUID moduleId,
+            String studentEmail,
+            String imageReference,
+            Integer applicationPort,
+            String healthPath,
+            SubmissionStatus status) {
+    }
+
+    public record ValidationJobResponse(
+            UUID id,
+            UUID submissionId,
+            String imageReference,
+            ValidationJobStatus status,
+            String logsUri,
+            String errorMessage) {
+    }
+
+    public record CompleteValidationRequest(boolean passed, String logsUri, String errorMessage) {
+    }
+
+    public record CreateReportRequest(
+            @NotNull UUID moduleId,
+            UUID submissionId,
+            @NotNull ReportType type,
+            @NotBlank String title,
+            @NotBlank String contentMarkdown) {
+    }
+
+    public record ReportResponse(
+            UUID id,
+            String authorEmail,
+            UUID moduleId,
+            UUID submissionId,
+            ReportType type,
+            String title,
+            String contentMarkdown,
+            ReportStatus status) {
+    }
+
+    public record CreateReviewRequest(
+            @NotNull UUID reportId,
+            @NotNull ReviewDecision decision,
+            @NotNull @Min(0) @Max(100) Integer score,
+            @NotBlank String commentMarkdown) {
+    }
+
+    public record ReviewResponse(
+            UUID id,
+            UUID reportId,
+            String curatorEmail,
+            ReviewDecision decision,
+            Integer score,
+            String commentMarkdown) {
+    }
+
+    public record AuditEventResponse(
+            UUID id,
+            String actorEmail,
+            String action,
+            String targetType,
+            UUID targetId,
+            String metadataJson,
+            OffsetDateTime createdAt) {
+    }
+}

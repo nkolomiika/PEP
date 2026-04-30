@@ -3,9 +3,8 @@ package ru.pep.platform.domain;
 public enum SubmissionStatus {
     DRAFT,
     SUBMITTED,
-    BUILD_QUEUED,
-    BUILDING,
-    BUILD_FAILED,
+    VALIDATION_QUEUED,
+    TECHNICAL_VALIDATION,
     TECHNICAL_VALIDATION_FAILED,
     READY_FOR_REVIEW,
     APPROVED,
