@@ -421,6 +421,49 @@ function formatBytes(sizeBytes: number) {
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function ProgressBar({ label, value, total }: { label: string; value: number; total: number }) {
+  const percent = total === 0 ? 0 : Math.round((value / total) * 100);
+
+  return (
+    <div className="progress-chart">
+      <div className="progress-chart-header">
+        <strong>{label}</strong>
+        <span className="muted">
+          {value}/{total} ({percent}%)
+        </span>
+      </div>
+      <div className="progress-track" aria-label={`${label}: ${percent}%`}>
+        <div className="progress-fill" style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function StatusDistribution({ title, counts }: { title: string; counts: Record<string, number> }) {
+  const entries = Object.entries(counts);
+  const total = entries.reduce((sum, [, count]) => sum + count, 0);
+
+  return (
+    <div className="progress-chart">
+      <strong>{title}</strong>
+      {entries.length === 0 ? (
+        <p className="muted">Нет данных для графика.</p>
+      ) : (
+        entries.map(([status, count]) => (
+          <ProgressBar key={status} label={statusLabels[status] ?? status} value={count} total={total} />
+        ))
+      )}
+    </div>
+  );
+}
+
+function countByStatus(items: Array<{ status: string }>) {
+  return items.reduce<Record<string, number>>((counts, item) => {
+    counts[item.status] = (counts[item.status] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
 function App() {
   const [account, setAccount] = useState<DemoAccount>(demoAccounts[0]);
   const [state, setState] = useState<ApiState>({
@@ -870,6 +913,8 @@ function StudentDashboard({
     [reviews]
   );
   const selectedLessonCompleted = selectedLesson ? completedLessonIds.has(selectedLesson.id) : false;
+  const reviewedReportsCount = reports.filter((report) => reviewsByReportId.has(report.id)).length;
+  const submittedAssignmentsCount = assignments.filter((assignment) => assignment.status === "SUBMITTED").length;
 
   return (
     <section className="grid">
@@ -930,6 +975,17 @@ function StudentDashboard({
             </div>
           </>
         )}
+      </article>
+
+      <article className="card wide">
+        <h2>Progress dashboard</h2>
+        <div className="chart-grid">
+          <ProgressBar label="Изучение уроков" value={completedLessonIds.size} total={lessons.length} />
+          <ProgressBar label="Отчеты с feedback" value={reviewedReportsCount} total={reports.length} />
+          <ProgressBar label="Black box цели закрыты" value={submittedAssignmentsCount} total={assignments.length} />
+          <StatusDistribution title="Submissions по статусам" counts={countByStatus(submissions)} />
+          <StatusDistribution title="Reports по статусам" counts={countByStatus(reports)} />
+        </div>
       </article>
 
       <article className="card wide">
@@ -1372,13 +1428,11 @@ function AdminDashboard({
   const pendingLabSubmissions = approvedSubmissions.filter((submission) => !labSubmissionIds.has(submission.id));
   const runningLabs = labs.filter((lab) => lab.status === "RUNNING");
   const labStatusCounts = useMemo(
-    () =>
-      labs.reduce<Record<string, number>>((counts, lab) => {
-        counts[lab.status] = (counts[lab.status] ?? 0) + 1;
-        return counts;
-      }, {}),
+    () => countByStatus(labs),
     [labs]
   );
+  const passedValidationJobs = validationJobs.filter((job) => job.status === "PASSED").length;
+  const approvedReports = reports.filter((report) => report.status === "APPROVED").length;
 
   return (
     <section className="grid">
@@ -1448,6 +1502,17 @@ function AdminDashboard({
               </ul>
             )}
           </div>
+        </div>
+      </article>
+
+      <article className="card wide">
+        <h2>Progress analytics</h2>
+        <div className="chart-grid">
+          <ProgressBar label="Technical validation passed" value={passedValidationJobs} total={validationJobs.length} />
+          <ProgressBar label="Approved reports" value={approvedReports} total={reports.length} />
+          <ProgressBar label="Labs created" value={labs.length} total={approvedSubmissions.length} />
+          <StatusDistribution title="Validation jobs по статусам" counts={countByStatus(validationJobs)} />
+          <StatusDistribution title="Labs по статусам" counts={labStatusCounts} />
         </div>
       </article>
 
