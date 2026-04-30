@@ -8,6 +8,8 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 import ru.pep.platform.domain.CourseStatus;
+import ru.pep.platform.domain.BlackBoxAssignmentStatus;
+import ru.pep.platform.domain.LabStatus;
 import ru.pep.platform.domain.ModuleStatus;
 import ru.pep.platform.domain.ReportStatus;
 import ru.pep.platform.domain.ReportType;
@@ -103,5 +105,34 @@ public final class CoreDtos {
             UUID targetId,
             String metadataJson,
             OffsetDateTime createdAt) {
+    }
+
+    public record CreateLabRequest(@NotNull UUID submissionId) {
+    }
+
+    public record LabResponse(
+            UUID id,
+            UUID submissionId,
+            String studentEmail,
+            String imageReference,
+            String namespace,
+            String deploymentName,
+            String serviceName,
+            String routeUrl,
+            LabStatus status,
+            OffsetDateTime expiresAt) {
+    }
+
+    public record DistributionResponse(UUID moduleId, int createdAssignments) {
+    }
+
+    public record BlackBoxAssignmentResponse(
+            UUID id,
+            UUID moduleId,
+            UUID targetLabId,
+            String targetUrl,
+            String targetImageReference,
+            BlackBoxAssignmentStatus status,
+            OffsetDateTime assignedAt) {
     }
 }

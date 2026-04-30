@@ -6,15 +6,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.pep.platform.api.CoreDtos;
 import ru.pep.platform.domain.AppUser;
+import ru.pep.platform.domain.BlackBoxAssignment;
+import ru.pep.platform.domain.LabInstance;
 import ru.pep.platform.domain.Course;
 import ru.pep.platform.domain.LearningModule;
 import ru.pep.platform.domain.Report;
 import ru.pep.platform.domain.Review;
 import ru.pep.platform.domain.Role;
 import ru.pep.platform.domain.Submission;
+import ru.pep.platform.domain.SubmissionStatus;
 import ru.pep.platform.domain.ValidationJob;
 import ru.pep.platform.repository.AppUserRepository;
+import ru.pep.platform.repository.BlackBoxAssignmentRepository;
 import ru.pep.platform.repository.CourseRepository;
+import ru.pep.platform.repository.LabInstanceRepository;
 import ru.pep.platform.repository.LearningModuleRepository;
 import ru.pep.platform.repository.ReportRepository;
 import ru.pep.platform.repository.ReviewRepository;
@@ -31,6 +36,8 @@ public class CorePlatformService {
     private final ValidationJobRepository validationJobs;
     private final ReportRepository reports;
     private final ReviewRepository reviews;
+    private final LabInstanceRepository labs;
+    private final BlackBoxAssignmentRepository assignments;
     private final AuditService audit;
 
     public CorePlatformService(
@@ -41,6 +48,8 @@ public class CorePlatformService {
             ValidationJobRepository validationJobs,
             ReportRepository reports,
             ReviewRepository reviews,
+            LabInstanceRepository labs,
+            BlackBoxAssignmentRepository assignments,
             AuditService audit) {
         this.users = users;
         this.courses = courses;
@@ -49,6 +58,8 @@ public class CorePlatformService {
         this.validationJobs = validationJobs;
         this.reports = reports;
         this.reviews = reviews;
+        this.labs = labs;
+        this.assignments = assignments;
         this.audit = audit;
     }
 
@@ -158,6 +169,63 @@ public class CorePlatformService {
         return toReviewResponse(review);
     }
 
+    @Transactional
+    public CoreDtos.LabResponse createLab(String email, CoreDtos.CreateLabRequest request) {
+        AppUser actor = currentUser(email);
+        Submission submission = submissions.findById(request.submissionId())
+                .orElseThrow(() -> new NotFoundException("Submission не найден"));
+        if (submission.getStatus() != SubmissionStatus.APPROVED) {
+            throw new AccessDeniedException("Lab можно создать только для принятой работы");
+        }
+        LabInstance lab = labs.findBySubmission(submission)
+                .orElseGet(() -> labs.save(new LabInstance(
+                        submission,
+                        "pep-lab-" + shortId(submission.getId()),
+                        "lab-" + shortId(submission.getId()),
+                        "svc-" + shortId(submission.getId()),
+                        "http://localhost:18080")));
+        audit.record(actor, "LAB_CREATED", "LabInstance", lab.getId(), "{\"submissionId\":\"" + submission.getId() + "\"}");
+        return toLabResponse(lab);
+    }
+
+    @Transactional(readOnly = true)
+    public List<CoreDtos.LabResponse> listLabs() {
+        return labs.findAll().stream().map(this::toLabResponse).toList();
+    }
+
+    @Transactional
+    public CoreDtos.DistributionResponse distributeBlackBox(String email, UUID moduleId) {
+        AppUser actor = currentUser(email);
+        LearningModule module = modules.findById(moduleId)
+                .orElseThrow(() -> new NotFoundException("Модуль не найден"));
+        List<LabInstance> moduleLabs = labs.findBySubmissionModuleId(moduleId);
+        List<AppUser> students = users.findAll().stream()
+                .filter(user -> user.getRole() == Role.STUDENT)
+                .toList();
+        int created = 0;
+        for (AppUser student : students) {
+            for (LabInstance lab : moduleLabs) {
+                if (lab.getSubmission().getStudent().getId().equals(student.getId())) {
+                    continue;
+                }
+                if (assignments.existsByModuleAndStudentAndTargetLabInstance(module, student, lab)) {
+                    continue;
+                }
+                assignments.save(new BlackBoxAssignment(module, student, lab));
+                created++;
+                break;
+            }
+        }
+        audit.record(actor, "BLACK_BOX_DISTRIBUTION_COMPLETED", "Module", moduleId, "{\"createdAssignments\":" + created + "}");
+        return new CoreDtos.DistributionResponse(moduleId, created);
+    }
+
+    @Transactional(readOnly = true)
+    public List<CoreDtos.BlackBoxAssignmentResponse> listMyAssignments(String email) {
+        AppUser student = currentUser(email);
+        return assignments.findByStudent(student).stream().map(this::toAssignmentResponse).toList();
+    }
+
     @Transactional(readOnly = true)
     public List<CoreDtos.AuditEventResponse> latestAuditEvents() {
         return audit.latest().stream()
@@ -187,6 +255,10 @@ public class CorePlatformService {
             return "/health";
         }
         return healthPath.startsWith("/") ? healthPath : "/" + healthPath;
+    }
+
+    private String shortId(UUID id) {
+        return id.toString().substring(0, 8);
     }
 
     private CoreDtos.CourseResponse toCourseResponse(Course course) {
@@ -245,6 +317,32 @@ public class CorePlatformService {
                 review.getDecision(),
                 review.getScore(),
                 review.getCommentMarkdown());
+    }
+
+    private CoreDtos.LabResponse toLabResponse(LabInstance lab) {
+        return new CoreDtos.LabResponse(
+                lab.getId(),
+                lab.getSubmission().getId(),
+                lab.getSubmission().getStudent().getEmail(),
+                lab.getSubmission().getImageReference(),
+                lab.getNamespace(),
+                lab.getDeploymentName(),
+                lab.getServiceName(),
+                lab.getRouteUrl(),
+                lab.getStatus(),
+                lab.getExpiresAt());
+    }
+
+    private CoreDtos.BlackBoxAssignmentResponse toAssignmentResponse(BlackBoxAssignment assignment) {
+        LabInstance lab = assignment.getTargetLabInstance();
+        return new CoreDtos.BlackBoxAssignmentResponse(
+                assignment.getId(),
+                assignment.getModule().getId(),
+                lab.getId(),
+                lab.getRouteUrl(),
+                lab.getSubmission().getImageReference(),
+                assignment.getStatus(),
+                assignment.getAssignedAt());
     }
 
     public static class NotFoundException extends RuntimeException {

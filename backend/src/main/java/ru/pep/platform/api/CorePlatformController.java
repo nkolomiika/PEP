@@ -90,6 +90,33 @@ public class CorePlatformController {
         return platform.createReview(principal.getName(), request);
     }
 
+    @PostMapping("/labs")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('ADMIN')")
+    public CoreDtos.LabResponse createLab(
+            Principal principal,
+            @Valid @RequestBody CoreDtos.CreateLabRequest request) {
+        return platform.createLab(principal.getName(), request);
+    }
+
+    @GetMapping("/labs")
+    @PreAuthorize("hasAnyRole('CURATOR','ADMIN')")
+    public List<CoreDtos.LabResponse> listLabs() {
+        return platform.listLabs();
+    }
+
+    @PostMapping("/modules/{moduleId}/black-box-assignments/distribute")
+    @PreAuthorize("hasRole('ADMIN')")
+    public CoreDtos.DistributionResponse distributeBlackBox(Principal principal, @PathVariable UUID moduleId) {
+        return platform.distributeBlackBox(principal.getName(), moduleId);
+    }
+
+    @GetMapping("/black-box-assignments/my")
+    @PreAuthorize("hasRole('STUDENT')")
+    public List<CoreDtos.BlackBoxAssignmentResponse> listMyAssignments(Principal principal) {
+        return platform.listMyAssignments(principal.getName());
+    }
+
     @GetMapping("/audit")
     @PreAuthorize("hasRole('ADMIN')")
     public List<CoreDtos.AuditEventResponse> latestAuditEvents() {

@@ -123,6 +123,31 @@ class CorePlatformControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.decision").value("APPROVED"));
 
+        MvcResult labResult = mockMvc.perform(post("/api/labs")
+                        .with(httpBasic("admin@pep.local", "admin"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "submissionId": "%s"
+                                }
+                                """.formatted(submissionId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("RUNNING"))
+                .andReturn();
+
+        String labId = objectMapper.readTree(labResult.getResponse().getContentAsString()).get("id").asText();
+
+        mockMvc.perform(post("/api/modules/{moduleId}/black-box-assignments/distribute", moduleId)
+                        .with(httpBasic("admin@pep.local", "admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.createdAssignments").value(1));
+
+        mockMvc.perform(get("/api/black-box-assignments/my")
+                        .with(httpBasic("student2@pep.local", "student")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].targetLabId").value(labId));
+
         mockMvc.perform(get("/api/audit")
                         .with(httpBasic("admin@pep.local", "admin")))
                 .andExpect(status().isOk());

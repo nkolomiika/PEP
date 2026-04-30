@@ -68,11 +68,36 @@ type AuditEvent = {
   createdAt: string;
 };
 
+type Lab = {
+  id: string;
+  submissionId: string;
+  studentEmail: string;
+  imageReference: string;
+  namespace: string;
+  deploymentName: string;
+  serviceName: string;
+  routeUrl: string;
+  status: string;
+  expiresAt: string;
+};
+
+type BlackBoxAssignment = {
+  id: string;
+  moduleId: string;
+  targetLabId: string;
+  targetUrl: string;
+  targetImageReference: string;
+  status: string;
+  assignedAt: string;
+};
+
 type ApiState = {
   courses: Course[];
   submissions: Submission[];
   validationJobs: ValidationJob[];
   reports: Report[];
+  labs: Lab[];
+  assignments: BlackBoxAssignment[];
   auditEvents: AuditEvent[];
 };
 
@@ -96,7 +121,11 @@ const statusLabels: Record<string, string> = {
   QUEUED: "В очереди",
   PASSED: "Проверка пройдена",
   FAILED: "Проверка завершилась ошибкой",
-  SUBMITTED: "Отправлен"
+  SUBMITTED: "Отправлен",
+  RUNNING: "Запущен",
+  ASSIGNED: "Назначено",
+  IN_PROGRESS: "В работе",
+  SCORED: "Оценено"
 };
 
 const roleLabels: Record<Role, string> = {
@@ -142,6 +171,8 @@ function App() {
     submissions: [],
     validationJobs: [],
     reports: [],
+    labs: [],
+    assignments: [],
     auditEvents: []
   });
   const [loading, setLoading] = useState(false);
@@ -160,9 +191,17 @@ function App() {
         apiRequest<ValidationJob[]>(activeAccount, "/api/validation-jobs"),
         apiRequest<Report[]>(activeAccount, "/api/reports")
       ]);
+      const labs =
+        activeAccount.role === "ADMIN" || activeAccount.role === "CURATOR"
+          ? await apiRequest<Lab[]>(activeAccount, "/api/labs")
+          : [];
+      const assignments =
+        activeAccount.role === "STUDENT"
+          ? await apiRequest<BlackBoxAssignment[]>(activeAccount, "/api/black-box-assignments/my")
+          : [];
       const auditEvents =
         activeAccount.role === "ADMIN" ? await apiRequest<AuditEvent[]>(activeAccount, "/api/audit") : [];
-      setState({ courses, submissions, validationJobs, reports, auditEvents });
+      setState({ courses, submissions, validationJobs, reports, labs, assignments, auditEvents });
       setMessage("Данные загружены.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось загрузить данные.");
@@ -240,6 +279,7 @@ function App() {
           submissions={state.submissions}
           validationJobs={state.validationJobs}
           reports={state.reports}
+          assignments={state.assignments}
           onCreateSubmission={(payload) =>
             withRefresh(
               () =>
@@ -299,7 +339,28 @@ function App() {
           submissions={state.submissions}
           validationJobs={state.validationJobs}
           reports={state.reports}
+          labs={state.labs}
           auditEvents={state.auditEvents}
+          firstModule={firstModule}
+          onCreateLab={(submissionId) =>
+            withRefresh(
+              () =>
+                apiRequest(account, "/api/labs", {
+                  method: "POST",
+                  body: JSON.stringify({ submissionId })
+                }),
+              "Lab instance создан для принятой работы."
+            )
+          }
+          onDistribute={(moduleId) =>
+            withRefresh(
+              () =>
+                apiRequest(account, `/api/modules/${moduleId}/black-box-assignments/distribute`, {
+                  method: "POST"
+                }),
+              "Black box цели распределены."
+            )
+          }
         />
       )}
     </main>
@@ -350,6 +411,7 @@ function StudentDashboard({
   submissions,
   validationJobs,
   reports,
+  assignments,
   onCreateSubmission,
   onCreateReport
 }: {
@@ -357,6 +419,7 @@ function StudentDashboard({
   submissions: Submission[];
   validationJobs: ValidationJob[];
   reports: Report[];
+  assignments: BlackBoxAssignment[];
   onCreateSubmission: (payload: {
     moduleId: string;
     imageReference: string;
@@ -462,6 +525,17 @@ function StudentDashboard({
             <>
               <strong>{report.title}</strong>
               <StatusBadge value={report.status} />
+            </>
+          )}
+        />
+        <EntityList
+          title="Мои black box цели"
+          items={assignments}
+          render={(assignment) => (
+            <>
+              <strong>{assignment.targetUrl}</strong>
+              <StatusBadge value={assignment.status} />
+              <p className="muted">Image target: {assignment.targetImageReference}</p>
             </>
           )}
         />
@@ -578,13 +652,24 @@ function AdminDashboard({
   submissions,
   validationJobs,
   reports,
-  auditEvents
+  labs,
+  auditEvents,
+  firstModule,
+  onCreateLab,
+  onDistribute
 }: {
   submissions: Submission[];
   validationJobs: ValidationJob[];
   reports: Report[];
+  labs: Lab[];
   auditEvents: AuditEvent[];
+  firstModule?: LearningModule;
+  onCreateLab: (submissionId: string) => Promise<void>;
+  onDistribute: (moduleId: string) => Promise<void>;
 }) {
+  const approvedSubmissions = submissions.filter((submission) => submission.status === "APPROVED");
+  const labSubmissionIds = new Set(labs.map((lab) => lab.submissionId));
+
   return (
     <section className="grid">
       <article className="card">
@@ -602,7 +687,52 @@ function AdminDashboard({
             <dt>Reports</dt>
             <dd>{reports.length}</dd>
           </div>
+          <div>
+            <dt>Labs</dt>
+            <dd>{labs.length}</dd>
+          </div>
         </dl>
+      </article>
+
+      <article className="card">
+        <h2>Admin: lab runtime</h2>
+        <EntityList
+          title="Принятые submissions"
+          items={approvedSubmissions}
+          render={(submission) => (
+            <>
+              <strong>{submission.imageReference}</strong>
+              <p className="muted">{submission.studentEmail}</p>
+              {labSubmissionIds.has(submission.id) ? (
+                <StatusBadge value="RUNNING" />
+              ) : (
+                <button type="button" onClick={() => void onCreateLab(submission.id)}>
+                  Создать lab instance
+                </button>
+              )}
+            </>
+          )}
+        />
+        <EntityList
+          title="Lab instances"
+          items={labs}
+          render={(lab) => (
+            <>
+              <strong>{lab.routeUrl}</strong>
+              <StatusBadge value={lab.status} />
+              <p className="muted">
+                {lab.namespace} / {lab.serviceName}
+              </p>
+            </>
+          )}
+        />
+        {firstModule ? (
+          <button type="button" onClick={() => void onDistribute(firstModule.id)}>
+            Распределить black box цели
+          </button>
+        ) : (
+          <EmptyState>Нет активного модуля для распределения.</EmptyState>
+        )}
       </article>
 
       <article className="card">
