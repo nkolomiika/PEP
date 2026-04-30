@@ -19,6 +19,11 @@
 | `/student/reports/:id/edit` | White/black box отчет | Reports |
 | `/student/assignments` | Black box targets | Assignments |
 
+Student dashboard показывает selector учебного модуля. Для курса OWASP Top 10 selector содержит
+`A01`-`A10`, после выбора модуль загружает свои уроки, progress, сдачу Docker image и module result.
+Admin/Curator demo flow по умолчанию продолжает использовать `A03. Injection` как полностью
+демонстрируемый lab-модуль.
+
 ## Curator routes
 
 | Route | Сценарий | API |

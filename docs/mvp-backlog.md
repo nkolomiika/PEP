@@ -99,7 +99,7 @@ Backlog разбивает MVP на проверяемые задачи. Он д
 - Dependency scanning.
 - Полноценный ingress вместо port-forward.
 - SSE/WebSocket для live statuses.
-- Расширение всех OWASP Top 10 тем до полноценных labs.
+- Расширение всех OWASP Top 10 тем до полноценных labs. Базовый seed `A01`-`A10` с теорией, white box guidance и black box checklist готов; `A03. Injection` остается полным demo-flow модулем.
 - Интеграция с внешним LMS.
 - Production monitoring и alerting.
 

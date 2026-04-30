@@ -3,6 +3,7 @@ package ru.pep.platform.api;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -41,6 +42,7 @@ class CorePlatformControllerTest {
                 .andReturn();
 
         JsonNode courses = objectMapper.readTree(coursesResult.getResponse().getContentAsString());
+        assertEquals(10, countModules(courses, "OWASP Top 10"));
         String moduleId = findModuleId(courses, "A03. Injection");
 
         MvcResult lessonsResult = mockMvc.perform(get("/api/modules/{moduleId}/lessons", moduleId)
@@ -306,5 +308,14 @@ class CorePlatformControllerTest {
             }
         }
         throw new AssertionError("Module not found: " + moduleTitle);
+    }
+
+    private int countModules(JsonNode courses, String courseTitle) {
+        for (JsonNode course : courses) {
+            if (courseTitle.equals(course.get("title").asText())) {
+                return course.get("modules").size();
+            }
+        }
+        throw new AssertionError("Course not found: " + courseTitle);
     }
 }

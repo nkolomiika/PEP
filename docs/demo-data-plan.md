@@ -20,10 +20,12 @@ production-ready окружении.
 
 ## Учебные данные
 
-- Курс: `OWASP Top 10`.
+- Курс: `OWASP Top 10` с модулями `A01`-`A10`.
 - Вводный модуль: `Docker intro`.
-- Практический модуль: `A03. Injection`.
+- Основной демонстрационный практический модуль: `A03. Injection`.
 - Основная тема: SQL Injection.
+- Остальные OWASP модули содержат базовые уроки: теория/scope, white box lab guidance,
+  black box checklist.
 - Дедлайны: учебные значения, достаточные для прохождения demo flow за один запуск.
 
 ## Docker images
