@@ -52,6 +52,7 @@ type Report = {
   authorEmail: string;
   moduleId: string;
   submissionId?: string;
+  blackBoxAssignmentId?: string;
   type: ReportType;
   title: string;
   contentMarkdown: string;
@@ -429,6 +430,7 @@ function StudentDashboard({
   onCreateReport: (payload: {
     moduleId: string;
     submissionId?: string;
+    blackBoxAssignmentId?: string;
     type: ReportType;
     title: string;
     contentMarkdown: string;
@@ -436,6 +438,9 @@ function StudentDashboard({
 }) {
   const [imageReference, setImageReference] = useState("localhost:5001/vulnerable-sqli-demo:latest");
   const [reportText, setReportText] = useState("Payload: ' OR '1'='1\nEvidence: login bypass воспроизводится.");
+  const [blackBoxReportText, setBlackBoxReportText] = useState(
+    "Target: назначенный lab\nPayload: ' OR '1'='1\nEvidence: результат поиска раскрывает лишние данные."
+  );
   const latestSubmission = submissions[0];
 
   return (
@@ -536,6 +541,30 @@ function StudentDashboard({
               <strong>{assignment.targetUrl}</strong>
               <StatusBadge value={assignment.status} />
               <p className="muted">Image target: {assignment.targetImageReference}</p>
+              {firstModule && assignment.status !== "SUBMITTED" && (
+                <form
+                  className="form nested-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void onCreateReport({
+                      moduleId: firstModule.id,
+                      blackBoxAssignmentId: assignment.id,
+                      type: "BLACK_BOX",
+                      title: "Black box отчет по SQL Injection",
+                      contentMarkdown: blackBoxReportText
+                    });
+                  }}
+                >
+                  <label htmlFor={`blackBoxReport-${assignment.id}`}>Black box evidence</label>
+                  <textarea
+                    id={`blackBoxReport-${assignment.id}`}
+                    rows={5}
+                    value={blackBoxReportText}
+                    onChange={(event) => setBlackBoxReportText(event.target.value)}
+                  />
+                  <button type="submit">Отправить black box отчет</button>
+                </form>
+              )}
             </>
           )}
         />

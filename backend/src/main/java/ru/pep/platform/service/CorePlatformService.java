@@ -141,10 +141,19 @@ public class CorePlatformService {
                     .orElseThrow(() -> new NotFoundException("Submission не найден"));
             assertCanReadSubmission(author, submission);
         }
+        BlackBoxAssignment assignment = null;
+        if (request.blackBoxAssignmentId() != null) {
+            assignment = assignments.findById(request.blackBoxAssignmentId())
+                    .orElseThrow(() -> new NotFoundException("Black box assignment не найден"));
+            if (!assignment.getStudent().getId().equals(author.getId())) {
+                throw new AccessDeniedException("Нет доступа к чужому black box заданию");
+            }
+        }
         Report report = reports.save(new Report(
                 author,
                 module,
                 submission,
+                assignment,
                 request.type(),
                 request.title(),
                 request.contentMarkdown()));
@@ -303,6 +312,7 @@ public class CorePlatformService {
                 report.getAuthor().getEmail(),
                 report.getModule().getId(),
                 report.getSubmission() == null ? null : report.getSubmission().getId(),
+                report.getBlackBoxAssignment() == null ? null : report.getBlackBoxAssignment().getId(),
                 report.getType(),
                 report.getTitle(),
                 report.getContentMarkdown(),

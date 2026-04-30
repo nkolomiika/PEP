@@ -65,6 +65,7 @@ public final class CoreDtos {
     public record CreateReportRequest(
             @NotNull UUID moduleId,
             UUID submissionId,
+            UUID blackBoxAssignmentId,
             @NotNull ReportType type,
             @NotBlank String title,
             @NotBlank String contentMarkdown) {
@@ -75,6 +76,7 @@ public final class CoreDtos {
             String authorEmail,
             UUID moduleId,
             UUID submissionId,
+            UUID blackBoxAssignmentId,
             ReportType type,
             String title,
             String contentMarkdown,

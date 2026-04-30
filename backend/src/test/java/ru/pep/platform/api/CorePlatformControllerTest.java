@@ -142,11 +142,30 @@ class CorePlatformControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.createdAssignments").value(1));
 
-        mockMvc.perform(get("/api/black-box-assignments/my")
+        MvcResult assignmentResult = mockMvc.perform(get("/api/black-box-assignments/my")
                         .with(httpBasic("student2@pep.local", "student")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].targetLabId").value(labId));
+                .andExpect(jsonPath("$[0].targetLabId").value(labId))
+                .andReturn();
+
+        String assignmentId = objectMapper.readTree(assignmentResult.getResponse().getContentAsString()).get(0).get("id").asText();
+
+        mockMvc.perform(post("/api/reports")
+                        .with(httpBasic("student2@pep.local", "student"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "moduleId": "%s",
+                                  "blackBoxAssignmentId": "%s",
+                                  "type": "BLACK_BOX",
+                                  "title": "Black box отчет по SQL Injection",
+                                  "contentMarkdown": "Payload найден через форму поиска."
+                                }
+                                """.formatted(moduleId, assignmentId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.blackBoxAssignmentId").value(assignmentId))
+                .andExpect(jsonPath("$.status").value("SUBMITTED"));
 
         mockMvc.perform(get("/api/audit")
                         .with(httpBasic("admin@pep.local", "admin")))

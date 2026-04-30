@@ -33,6 +33,10 @@ public class Report {
     @JoinColumn(name = "submission_id")
     private Submission submission;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "black_box_assignment_id")
+    private BlackBoxAssignment blackBoxAssignment;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private ReportType type;
@@ -56,15 +60,26 @@ public class Report {
     protected Report() {
     }
 
-    public Report(AppUser author, LearningModule module, Submission submission, ReportType type, String title, String contentMarkdown) {
+    public Report(
+            AppUser author,
+            LearningModule module,
+            Submission submission,
+            BlackBoxAssignment blackBoxAssignment,
+            ReportType type,
+            String title,
+            String contentMarkdown) {
         this.author = author;
         this.module = module;
         this.submission = submission;
+        this.blackBoxAssignment = blackBoxAssignment;
         this.type = type;
         this.title = title;
         this.contentMarkdown = contentMarkdown;
         this.status = ReportStatus.SUBMITTED;
         this.submittedAt = OffsetDateTime.now();
+        if (blackBoxAssignment != null) {
+            blackBoxAssignment.markSubmitted();
+        }
     }
 
     @PrePersist
@@ -109,6 +124,10 @@ public class Report {
 
     public Submission getSubmission() {
         return submission;
+    }
+
+    public BlackBoxAssignment getBlackBoxAssignment() {
+        return blackBoxAssignment;
     }
 
     public ReportType getType() {
