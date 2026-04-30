@@ -187,6 +187,61 @@ pre {
   padding: 12px;
 }
 
+.preview-panel {
+  background: #f8fafc;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.markdown-preview {
+  color: #1e293b;
+  display: grid;
+  gap: 8px;
+}
+
+.markdown-preview h1,
+.markdown-preview h2,
+.markdown-preview h3,
+.markdown-preview p,
+.markdown-preview ul,
+.markdown-preview ol,
+.markdown-preview blockquote,
+.markdown-preview pre {
+  margin: 0;
+}
+
+.markdown-preview h1 {
+  font-size: 24px;
+}
+
+.markdown-preview h2 {
+  font-size: 20px;
+}
+
+.markdown-preview h3 {
+  font-size: 17px;
+}
+
+.markdown-preview blockquote {
+  border-left: 4px solid #93c5fd;
+  color: #475569;
+  padding-left: 12px;
+}
+
+.markdown-preview code {
+  background: #e2e8f0;
+  border-radius: 6px;
+  padding: 2px 5px;
+}
+
+.markdown-preview pre code {
+  background: transparent;
+  padding: 0;
+}
+
 .lesson-layout {
   display: grid;
   gap: 16px;

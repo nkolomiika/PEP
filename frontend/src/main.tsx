@@ -218,6 +218,136 @@ function EmptyState({ children }: { children: React.ReactNode }) {
   return <p className="muted empty">{children}</p>;
 }
 
+function MarkdownPreview({ source }: { source: string }) {
+  const rendered = useMemo(() => renderMarkdown(source), [source]);
+
+  if (source.trim().length === 0) {
+    return <EmptyState>Markdown preview появится после ввода текста.</EmptyState>;
+  }
+
+  return <div className="markdown-preview">{rendered}</div>;
+}
+
+function renderMarkdown(source: string) {
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const elements: React.ReactNode[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+
+    if (line.trim() === "") {
+      index++;
+      continue;
+    }
+
+    if (line.trim().startsWith("```")) {
+      const codeLines: string[] = [];
+      index++;
+      while (index < lines.length && !lines[index].trim().startsWith("```")) {
+        codeLines.push(lines[index]);
+        index++;
+      }
+      index++;
+      elements.push(
+        <pre key={`code-${index}`}>
+          <code>{codeLines.join("\n")}</code>
+        </pre>
+      );
+      continue;
+    }
+
+    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+    if (heading) {
+      const level = heading[1].length;
+      const content = renderInlineMarkdown(heading[2]);
+      elements.push(
+        level === 1 ? (
+          <h1 key={`heading-${index}`}>{content}</h1>
+        ) : level === 2 ? (
+          <h2 key={`heading-${index}`}>{content}</h2>
+        ) : (
+          <h3 key={`heading-${index}`}>{content}</h3>
+        )
+      );
+      index++;
+      continue;
+    }
+
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items: React.ReactNode[] = [];
+      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
+        items.push(
+          <li key={`li-${index}`}>
+            {renderInlineMarkdown(lines[index].replace(/^\s*[-*]\s+/, ""))}
+          </li>
+        );
+        index++;
+      }
+      elements.push(<ul key={`ul-${index}`}>{items}</ul>);
+      continue;
+    }
+
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items: React.ReactNode[] = [];
+      while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
+        items.push(
+          <li key={`oli-${index}`}>
+            {renderInlineMarkdown(lines[index].replace(/^\s*\d+\.\s+/, ""))}
+          </li>
+        );
+        index++;
+      }
+      elements.push(<ol key={`ol-${index}`}>{items}</ol>);
+      continue;
+    }
+
+    if (/^\s*>\s?/.test(line)) {
+      const quoteLines: string[] = [];
+      while (index < lines.length && /^\s*>\s?/.test(lines[index])) {
+        quoteLines.push(lines[index].replace(/^\s*>\s?/, ""));
+        index++;
+      }
+      elements.push(<blockquote key={`quote-${index}`}>{renderInlineMarkdown(quoteLines.join(" "))}</blockquote>);
+      continue;
+    }
+
+    const paragraphLines = [line];
+    index++;
+    while (index < lines.length && lines[index].trim() !== "" && !isMarkdownBlockStart(lines[index])) {
+      paragraphLines.push(lines[index]);
+      index++;
+    }
+    elements.push(<p key={`p-${index}`}>{renderInlineMarkdown(paragraphLines.join(" "))}</p>);
+  }
+
+  return elements;
+}
+
+function isMarkdownBlockStart(line: string) {
+  const trimmed = line.trim();
+  return (
+    trimmed.startsWith("```") ||
+    /^(#{1,3})\s+/.test(line) ||
+    /^\s*[-*]\s+/.test(line) ||
+    /^\s*\d+\.\s+/.test(line) ||
+    /^\s*>\s?/.test(line)
+  );
+}
+
+function renderInlineMarkdown(text: string) {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return <code key={index}>{part.slice(1, -1)}</code>;
+    }
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
+}
+
 function App() {
   const [account, setAccount] = useState<DemoAccount>(demoAccounts[0]);
   const [state, setState] = useState<ApiState>({
@@ -795,6 +925,10 @@ function StudentDashboard({
               value={reportText}
               onChange={(event) => setReportText(event.target.value)}
             />
+            <div className="preview-panel">
+              <strong>Preview отчета</strong>
+              <MarkdownPreview source={reportText} />
+            </div>
             <button type="submit">Отправить отчет куратору</button>
           </form>
         )}
@@ -823,7 +957,7 @@ function StudentDashboard({
                     Решение: <StatusBadge value={reviewsByReportId.get(report.id)!.decision} />
                   </p>
                   <p className="big">{reviewsByReportId.get(report.id)!.score}/100</p>
-                  <pre>{reviewsByReportId.get(report.id)!.commentMarkdown}</pre>
+                  <MarkdownPreview source={reviewsByReportId.get(report.id)!.commentMarkdown} />
                 </div>
               ) : (
                 <p className="muted">Feedback еще не получен.</p>
@@ -860,6 +994,10 @@ function StudentDashboard({
                     value={blackBoxReportText}
                     onChange={(event) => setBlackBoxReportText(event.target.value)}
                   />
+                  <div className="preview-panel">
+                    <strong>Preview black box отчета</strong>
+                    <MarkdownPreview source={blackBoxReportText} />
+                  </div>
                   <button type="submit">Отправить black box отчет</button>
                 </form>
               )}
@@ -988,7 +1126,7 @@ function ReviewForm({
           {validationJob.errorMessage && <p className="error-text">{validationJob.errorMessage}</p>}
         </div>
       )}
-      <pre>{report.contentMarkdown}</pre>
+      <MarkdownPreview source={report.contentMarkdown} />
       <label htmlFor={`decision-${report.id}`}>Решение</label>
       <select id={`decision-${report.id}`} value={decision} onChange={(event) => setDecision(event.target.value as ReviewDecision)}>
         <option value="APPROVED">Принять</option>
@@ -1006,6 +1144,10 @@ function ReviewForm({
       />
       <label htmlFor={`comment-${report.id}`}>Комментарий</label>
       <textarea id={`comment-${report.id}`} value={comment} onChange={(event) => setComment(event.target.value)} />
+      <div className="preview-panel">
+        <strong>Preview комментария</strong>
+        <MarkdownPreview source={comment} />
+      </div>
       <button type="submit">Сохранить решение</button>
     </form>
   );

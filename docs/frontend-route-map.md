@@ -54,6 +54,11 @@
 - success state;
 - access denied state.
 
+## Report UX
+
+- Формы white box и black box отчетов показывают markdown preview до отправки.
+- Куратор видит report content и preview своего feedback в формате markdown.
+
 ## Acceptance criteria
 
 - Все P0 user stories имеют route.
