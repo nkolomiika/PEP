@@ -1159,6 +1159,21 @@ function CuratorDashboard({
     commentMarkdown: string;
   }) => Promise<void>;
 }) {
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [typeFilter, setTypeFilter] = useState<ReportType | "ALL">("ALL");
+  const [authorFilter, setAuthorFilter] = useState("");
+  const reportStatuses = useMemo(() => Array.from(new Set(reports.map((report) => report.status))).sort(), [reports]);
+  const filteredReports = useMemo(
+    () =>
+      reports.filter((report) => {
+        const statusMatches = statusFilter === "ALL" || report.status === statusFilter;
+        const typeMatches = typeFilter === "ALL" || report.type === typeFilter;
+        const authorMatches = report.authorEmail.toLowerCase().includes(authorFilter.trim().toLowerCase());
+        return statusMatches && typeMatches && authorMatches;
+      }),
+    [authorFilter, reports, statusFilter, typeFilter]
+  );
+
   return (
     <section className="grid">
       <article className="card">
@@ -1192,9 +1207,46 @@ function CuratorDashboard({
             </button>
           </div>
         )}
+        <div className="filter-panel">
+          <div>
+            <label htmlFor="reportStatusFilter">Статус</label>
+            <select id="reportStatusFilter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <option value="ALL">Все статусы</option>
+              {reportStatuses.map((status) => (
+                <option key={status} value={status}>
+                  {statusLabels[status] ?? status}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="reportTypeFilter">Тип отчета</label>
+            <select
+              id="reportTypeFilter"
+              value={typeFilter}
+              onChange={(event) => setTypeFilter(event.target.value as ReportType | "ALL")}
+            >
+              <option value="ALL">Все типы</option>
+              <option value="WHITE_BOX">White box</option>
+              <option value="BLACK_BOX">Black box</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="reportAuthorFilter">Автор</label>
+            <input
+              id="reportAuthorFilter"
+              placeholder="student@pep.local"
+              value={authorFilter}
+              onChange={(event) => setAuthorFilter(event.target.value)}
+            />
+          </div>
+        </div>
+        <p className="muted">
+          Найдено отчетов: {filteredReports.length} из {reports.length}
+        </p>
         <EntityList
           title="Очередь отчетов"
-          items={reports}
+          items={filteredReports}
           render={(report) => (
             <ReviewForm
               key={report.id}

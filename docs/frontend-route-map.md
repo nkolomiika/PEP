@@ -62,6 +62,7 @@
 - Формы white box и black box отчетов позволяют приложить файл evidence.
 - Куратор видит report content и preview своего feedback в формате markdown.
 - Куратор видит список вложений, приложенных к отчету.
+- Очередь куратора фильтруется по статусу, типу отчета и email автора.
 
 ## Acceptance criteria
 
