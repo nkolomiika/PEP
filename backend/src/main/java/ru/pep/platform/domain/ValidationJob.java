@@ -50,6 +50,19 @@ public class ValidationJob {
     @Column(name = "image_scan_finished_at")
     private OffsetDateTime imageScanFinishedAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "dependency_scan_status", length = 32)
+    private DependencyScanStatus dependencyScanStatus;
+
+    @Column(name = "dependency_scan_summary", columnDefinition = "TEXT")
+    private String dependencyScanSummary;
+
+    @Column(name = "dependency_scan_report", columnDefinition = "TEXT")
+    private String dependencyScanReport;
+
+    @Column(name = "dependency_scan_finished_at")
+    private OffsetDateTime dependencyScanFinishedAt;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 
@@ -114,6 +127,27 @@ public class ValidationJob {
         this.imageScanFinishedAt = OffsetDateTime.now();
     }
 
+    public void markDependencyScanPassed(String summary, String report) {
+        this.dependencyScanStatus = DependencyScanStatus.PASSED;
+        this.dependencyScanSummary = summary;
+        this.dependencyScanReport = report;
+        this.dependencyScanFinishedAt = OffsetDateTime.now();
+    }
+
+    public void markDependencyScanWarnings(String summary, String report) {
+        this.dependencyScanStatus = DependencyScanStatus.WARNINGS;
+        this.dependencyScanSummary = summary;
+        this.dependencyScanReport = report;
+        this.dependencyScanFinishedAt = OffsetDateTime.now();
+    }
+
+    public void markDependencyScanFailed(String summary, String report) {
+        this.dependencyScanStatus = DependencyScanStatus.FAILED;
+        this.dependencyScanSummary = summary;
+        this.dependencyScanReport = report;
+        this.dependencyScanFinishedAt = OffsetDateTime.now();
+    }
+
     public void pass(String logsUri) {
         this.status = ValidationJobStatus.PASSED;
         this.logsUri = logsUri;
@@ -162,5 +196,17 @@ public class ValidationJob {
 
     public String getImageScanReport() {
         return imageScanReport;
+    }
+
+    public DependencyScanStatus getDependencyScanStatus() {
+        return dependencyScanStatus;
+    }
+
+    public String getDependencyScanSummary() {
+        return dependencyScanSummary;
+    }
+
+    public String getDependencyScanReport() {
+        return dependencyScanReport;
     }
 }

@@ -150,7 +150,10 @@ Response:
   "errorMessage": null,
   "imageScanStatus": "WARNINGS",
   "imageScanSummary": "Image запускается от root; application port не объявлен в EXPOSE;",
-  "imageScanReport": "Baseline image scan..."
+  "imageScanReport": "Baseline image scan...",
+  "dependencyScanStatus": "WARNINGS",
+  "dependencyScanSummary": "SBOM/dependency labels не найдены; history содержит package install commands;",
+  "dependencyScanReport": "Baseline dependency scan..."
 }
 ```
 
@@ -168,6 +171,11 @@ Response:
 `PASSED`, `WARNINGS` или `FAILED`. MVP scan использует `docker image inspect`, проверяет запуск от root
 и наличие `EXPOSE` для application port. Полноценный CVE scanner остается задачей production-ready
 версии.
+
+`dependencyScanStatus` не блокирует technical validation и показывает baseline dependency scan:
+`PASSED`, `WARNINGS` или `FAILED`. MVP scan использует `docker image inspect` labels и
+`docker image history`, чтобы подсветить отсутствие SBOM labels и package install commands.
+Полноценный dependency/CVE scanner остается production-ready расширением.
 
 ## Reviews
 

@@ -73,6 +73,9 @@ type ValidationJob = {
   imageScanStatus?: string;
   imageScanSummary?: string;
   imageScanReport?: string;
+  dependencyScanStatus?: string;
+  dependencyScanSummary?: string;
+  dependencyScanReport?: string;
 };
 
 type ReportAttachment = {
@@ -475,6 +478,26 @@ function ImageScanSummary({ job }: { job: ValidationJob }) {
         <details>
           <summary>Технический report</summary>
           <pre>{job.imageScanReport}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function DependencyScanSummary({ job }: { job: ValidationJob }) {
+  if (!job.dependencyScanStatus) {
+    return <p className="muted">Dependency scan еще не выполнялся.</p>;
+  }
+
+  return (
+    <div className="feedback-box">
+      <strong>Dependency scan</strong>
+      <StatusBadge value={job.dependencyScanStatus} />
+      {job.dependencyScanSummary && <p>{job.dependencyScanSummary}</p>}
+      {job.dependencyScanReport && (
+        <details>
+          <summary>Технический report</summary>
+          <pre>{job.dependencyScanReport}</pre>
         </details>
       )}
     </div>
@@ -1135,6 +1158,7 @@ function StudentDashboard({
               <strong>{job.imageReference}</strong>
               <StatusBadge value={job.status} />
               <ImageScanSummary job={job} />
+              <DependencyScanSummary job={job} />
               {job.errorMessage && <p className="error-text">{job.errorMessage}</p>}
             </>
           )}
@@ -1267,6 +1291,7 @@ function CuratorDashboard({
               <strong>{job.imageReference}</strong>
               <StatusBadge value={job.status} />
               <ImageScanSummary job={job} />
+              <DependencyScanSummary job={job} />
               <div className="actions">
                 <button type="button" onClick={() => void onCompleteValidation(job.id, true)}>
                   Отметить как пройдено
@@ -1396,6 +1421,7 @@ function ReviewForm({
           <strong>Technical validation</strong>
           <StatusBadge value={validationJob.status} />
           <ImageScanSummary job={validationJob} />
+          <DependencyScanSummary job={validationJob} />
           {validationJob.logsUri && <p className="muted">Logs: {validationJob.logsUri}</p>}
           {validationJob.errorMessage && <p className="error-text">{validationJob.errorMessage}</p>}
         </div>

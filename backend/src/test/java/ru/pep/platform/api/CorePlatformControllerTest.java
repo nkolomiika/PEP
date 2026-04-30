@@ -116,7 +116,9 @@ class CorePlatformControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("PASSED"))
                 .andExpect(jsonPath("$.imageScanStatus").value(nullValue()))
-                .andExpect(jsonPath("$.imageScanSummary").value(nullValue()));
+                .andExpect(jsonPath("$.imageScanSummary").value(nullValue()))
+                .andExpect(jsonPath("$.dependencyScanStatus").value(nullValue()))
+                .andExpect(jsonPath("$.dependencyScanSummary").value(nullValue()));
 
         mockMvc.perform(get("/api/submissions")
                         .with(httpBasic("student2@pep.local", "student")))

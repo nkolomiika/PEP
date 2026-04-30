@@ -64,6 +64,7 @@ public class ValidationWorkerService {
         JobSnapshot snapshot = markPullingImage(jobId);
         runCommand(List.of("docker", "pull", snapshot.imageReference()));
         scanImage(jobId, snapshot);
+        scanDependencies(jobId, snapshot);
 
         markStartingContainer(jobId);
         runCommand(List.of(
@@ -132,6 +133,62 @@ public class ValidationWorkerService {
         }
         String report = "Baseline image scan\n" + inspectOutput.strip();
         return new ImageScanResult(summary.toString().strip(), report, rootUser || !exposesApplicationPort);
+    }
+
+    private void scanDependencies(java.util.UUID jobId, JobSnapshot snapshot) {
+        try {
+            CommandResult labels = runCommand(List.of(
+                    "docker",
+                    "image",
+                    "inspect",
+                    snapshot.imageReference(),
+                    "--format",
+                    "Labels={{json .Config.Labels}}"));
+            CommandResult history = runCommand(List.of(
+                    "docker",
+                    "image",
+                    "history",
+                    "--no-trunc",
+                    "--format",
+                    "{{.CreatedBy}}",
+                    snapshot.imageReference()));
+            DependencyScanResult scan = analyzeDependencyMetadata(labels.output(), history.output());
+            updateJob(jobId, job -> {
+                if (scan.hasWarnings()) {
+                    job.markDependencyScanWarnings(scan.summary(), scan.report());
+                } else {
+                    job.markDependencyScanPassed(scan.summary(), scan.report());
+                }
+            });
+        } catch (RuntimeException exception) {
+            updateJob(jobId, job -> job.markDependencyScanFailed("Dependency scan не выполнен", sanitizeOutput(exception.getMessage())));
+        }
+    }
+
+    private DependencyScanResult analyzeDependencyMetadata(String labelsOutput, String historyOutput) {
+        boolean hasSbomLabel = labelsOutput.toLowerCase().contains("sbom");
+        boolean hasPackageInstallCommands = historyOutput.lines().anyMatch(line -> {
+            String normalized = line.toLowerCase();
+            return normalized.contains("apt-get install")
+                    || normalized.contains("apk add")
+                    || normalized.contains("yum install")
+                    || normalized.contains("pip install")
+                    || normalized.contains("npm install")
+                    || normalized.contains("mvn ");
+        });
+
+        StringBuilder summary = new StringBuilder();
+        if (!hasSbomLabel) {
+            summary.append("SBOM/dependency labels не найдены; ");
+        }
+        if (hasPackageInstallCommands) {
+            summary.append("history содержит package install commands; ");
+        }
+        if (summary.isEmpty()) {
+            summary.append("Baseline dependency scan не выявил предупреждений.");
+        }
+        String report = "Baseline dependency scan\n" + labelsOutput.strip() + "\n\nImage history\n" + historyOutput.strip();
+        return new DependencyScanResult(summary.toString().strip(), report, !hasSbomLabel || hasPackageInstallCommands);
     }
 
     private JobSnapshot markPullingImage(java.util.UUID jobId) {
@@ -260,6 +317,9 @@ public class ValidationWorkerService {
     }
 
     private record ImageScanResult(String summary, String report, boolean hasWarnings) {
+    }
+
+    private record DependencyScanResult(String summary, String report, boolean hasWarnings) {
     }
 
     private record JobSnapshot(String imageReference, Integer applicationPort, String healthPath) {

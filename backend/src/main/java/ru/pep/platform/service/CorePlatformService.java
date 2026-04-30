@@ -563,7 +563,10 @@ public class CorePlatformService {
                 job.getErrorMessage(),
                 job.getImageScanStatus(),
                 job.getImageScanSummary(),
-                job.getImageScanReport());
+                job.getImageScanReport(),
+                job.getDependencyScanStatus(),
+                job.getDependencyScanSummary(),
+                job.getDependencyScanReport());
     }
 
     private CoreDtos.ReportResponse toReportResponse(Report report) {

@@ -40,6 +40,10 @@ Backend container в demo-compose запускает technical validation worker
 блокирует сдачу, но показывает в UI предупреждения, если image запускается от root или не объявляет
 `EXPOSE` для application port. Полноценный CVE scanner остается production-ready расширением.
 
+Следом worker выполняет baseline dependency scan: читает labels через `docker image inspect` и историю
+слоев через `docker image history`. Scan подсвечивает отсутствие SBOM labels и package install commands
+в layer history, но не блокирует сдачу.
+
 ## Запуск toolbox и local registry
 
 ```powershell

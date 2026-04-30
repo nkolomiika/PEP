@@ -52,6 +52,11 @@ Admin dashboard показывает количество approved submissions, 
 - Student и Curator dashboards показывают baseline image scan status, summary и technical report внутри validation job.
 - Scan warnings не блокируют technical validation, но помогают обсудить container hardening.
 
+## Dependency Scanning
+
+- Student и Curator dashboards показывают baseline dependency scan status, summary и technical report внутри validation job.
+- Scan warnings не блокируют technical validation, но помогают обсудить SBOM и управление зависимостями.
+
 ## Route guards
 
 - Anonymous user доступен только к `/login`.
