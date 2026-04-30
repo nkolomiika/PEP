@@ -39,6 +39,9 @@
 | `/admin/grades/export` | Экспорт оценок CSV | Module results |
 | `/admin/audit` | Audit trail | Audit |
 
+Admin dashboard показывает количество approved submissions, labs без созданного instance, running labs,
+статусы lab instances, namespace/service metadata, команды deploy/port-forward и срок жизни lab.
+
 ## Route guards
 
 - Anonymous user доступен только к `/login`.

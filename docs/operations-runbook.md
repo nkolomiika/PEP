@@ -90,6 +90,10 @@ Admin dashboard. Script преобразует `localhost:5001/...` в internal 
 `pep-local-registry:5000/...`, создает namespace `pep-lab-<submissionId-prefix>`, deployment,
 service, resource quota и limits.
 
+Admin dashboard также показывает сводку lab runtime: сколько approved submissions готовы к lab,
+сколько еще без lab instance, сколько labs в `RUNNING`, статусы созданных labs, namespace/service
+metadata, команды deploy/port-forward и срок жизни lab.
+
 Ожидаемый результат: lab pod находится в состоянии `Running`, а `kubectl get pods,svc -n
 pep-lab-<submissionId-prefix>` показывает deployment и service.
 

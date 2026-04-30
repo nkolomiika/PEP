@@ -1367,7 +1367,18 @@ function AdminDashboard({
   onDistribute: (moduleId: string) => Promise<void>;
 }) {
   const approvedSubmissions = submissions.filter((submission) => submission.status === "APPROVED");
-  const labSubmissionIds = new Set(labs.map((lab) => lab.submissionId));
+  const labBySubmissionId = useMemo(() => new Map(labs.map((lab) => [lab.submissionId, lab])), [labs]);
+  const labSubmissionIds = new Set(labBySubmissionId.keys());
+  const pendingLabSubmissions = approvedSubmissions.filter((submission) => !labSubmissionIds.has(submission.id));
+  const runningLabs = labs.filter((lab) => lab.status === "RUNNING");
+  const labStatusCounts = useMemo(
+    () =>
+      labs.reduce<Record<string, number>>((counts, lab) => {
+        counts[lab.status] = (counts[lab.status] ?? 0) + 1;
+        return counts;
+      }, {}),
+    [labs]
+  );
 
   return (
     <section className="grid">
@@ -1393,6 +1404,53 @@ function AdminDashboard({
         </dl>
       </article>
 
+      <article className="card wide">
+        <h2>Admin: состояние lab runtime</h2>
+        <dl className="metrics module-result">
+          <div>
+            <dt>Готовы к lab</dt>
+            <dd>{approvedSubmissions.length}</dd>
+          </div>
+          <div>
+            <dt>Без lab</dt>
+            <dd>{pendingLabSubmissions.length}</dd>
+          </div>
+          <div>
+            <dt>Running labs</dt>
+            <dd>{runningLabs.length}</dd>
+          </div>
+          <div>
+            <dt>Статусы</dt>
+            <dd>{Object.keys(labStatusCounts).length || "-"}</dd>
+          </div>
+        </dl>
+        <div className="lab-status-grid">
+          <div className="feedback-box">
+            <strong>Lab readiness</strong>
+            <p className="muted">Approved submissions должны получить lab instance перед black box distribution.</p>
+            {pendingLabSubmissions.length === 0 ? (
+              <StatusBadge value="COMPLETED" />
+            ) : (
+              <p className="error-text">Ожидают lab: {pendingLabSubmissions.length}</p>
+            )}
+          </div>
+          <div className="feedback-box">
+            <strong>Lab statuses</strong>
+            {Object.entries(labStatusCounts).length === 0 ? (
+              <p className="muted">Lab instances пока не созданы.</p>
+            ) : (
+              <ul className="compact-list">
+                {Object.entries(labStatusCounts).map(([status, count]) => (
+                  <li key={status}>
+                    <StatusBadge value={status} /> {count}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </article>
+
       <article className="card">
         <h2>Admin: lab runtime</h2>
         <EntityList
@@ -1403,7 +1461,10 @@ function AdminDashboard({
               <strong>{submission.imageReference}</strong>
               <p className="muted">{submission.studentEmail}</p>
               {labSubmissionIds.has(submission.id) ? (
-                <StatusBadge value="RUNNING" />
+                <>
+                  <StatusBadge value={labBySubmissionId.get(submission.id)!.status} />
+                  <p className="muted">Namespace: {labBySubmissionId.get(submission.id)!.namespace}</p>
+                </>
               ) : (
                 <button type="button" onClick={() => void onCreateLab(submission.id)}>
                   Создать lab instance
@@ -1419,9 +1480,12 @@ function AdminDashboard({
             <>
               <strong>{lab.routeUrl}</strong>
               <StatusBadge value={lab.status} />
+              <p className="muted">Student: {lab.studentEmail}</p>
+              <p className="muted">Image: {lab.imageReference}</p>
               <p className="muted">
                 {lab.namespace} / {lab.serviceName}
               </p>
+              <p className="muted">Expires: {new Date(lab.expiresAt).toLocaleString("ru-RU")}</p>
               <p className="muted">Deploy в kind:</p>
               <code>{lab.deployCommand}</code>
               <p className="muted">Port-forward:</p>

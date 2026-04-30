@@ -265,6 +265,17 @@ pre {
   padding: 10px 12px;
 }
 
+.lab-status-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.compact-list {
+  list-style: none;
+  padding: 0;
+}
+
 .lesson-layout {
   display: grid;
   gap: 16px;
