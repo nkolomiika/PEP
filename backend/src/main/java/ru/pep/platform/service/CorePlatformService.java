@@ -313,25 +313,41 @@ public class CorePlatformService {
         if (!modules.existsById(moduleId)) {
             throw new NotFoundException("Модуль не найден");
         }
-        boolean dockerPassed = submissions.findByStudentAndModuleId(student, moduleId).stream()
-                .anyMatch(submission -> submission.getStatus() == SubmissionStatus.READY_FOR_REVIEW
-                        || submission.getStatus() == SubmissionStatus.APPROVED
-                        || submission.getStatus() == SubmissionStatus.PUBLISHED_FOR_BLACK_BOX);
-        List<Review> moduleReviews = reviews.findByReportAuthorAndReportModuleId(student, moduleId);
-        Integer whiteBoxScore = bestScore(moduleReviews, ReportType.WHITE_BOX);
-        Integer blackBoxScore = bestScore(moduleReviews, ReportType.BLACK_BOX);
-        Integer finalScore = dockerPassed && whiteBoxScore != null && blackBoxScore != null
-                ? Math.round((float) (whiteBoxScore * 0.45 + blackBoxScore * 0.55))
-                : null;
-        String status;
-        if (!dockerPassed) {
-            status = "DOCKER_REQUIRED";
-        } else if (whiteBoxScore == null || blackBoxScore == null) {
-            status = "IN_PROGRESS";
-        } else {
-            status = "COMPLETED";
+        ModuleResult result = calculateModuleResult(student, moduleId);
+        return new CoreDtos.ModuleResultResponse(
+                moduleId,
+                result.dockerPassed(),
+                result.whiteBoxScore(),
+                result.blackBoxScore(),
+                result.finalScore(),
+                result.status());
+    }
+
+    @Transactional(readOnly = true)
+    public String exportModuleGradesCsv(String email, UUID moduleId) {
+        AppUser actor = currentUser(email);
+        if (actor.getRole() == Role.STUDENT) {
+            throw new AccessDeniedException("Экспорт оценок доступен только куратору или администратору");
         }
-        return new CoreDtos.ModuleResultResponse(moduleId, dockerPassed, whiteBoxScore, blackBoxScore, finalScore, status);
+        if (!modules.existsById(moduleId)) {
+            throw new NotFoundException("Модуль не найден");
+        }
+
+        StringBuilder csv = new StringBuilder("studentEmail,displayName,dockerPassed,whiteBoxScore,blackBoxScore,finalScore,status\n");
+        users.findAll().stream()
+                .filter(user -> user.getRole() == Role.STUDENT)
+                .forEach(studentItem -> {
+                    ModuleResult result = calculateModuleResult(studentItem, moduleId);
+                    csv.append(csvValue(studentItem.getEmail())).append(',')
+                            .append(csvValue(studentItem.getDisplayName())).append(',')
+                            .append(result.dockerPassed()).append(',')
+                            .append(nullableCsvValue(result.whiteBoxScore())).append(',')
+                            .append(nullableCsvValue(result.blackBoxScore())).append(',')
+                            .append(nullableCsvValue(result.finalScore())).append(',')
+                            .append(csvValue(result.status()))
+                            .append('\n');
+                });
+        return csv.toString();
     }
 
     @Transactional
@@ -463,6 +479,45 @@ public class CorePlatformService {
                 .map(Review::getScore)
                 .max(Integer::compareTo)
                 .orElse(null);
+    }
+
+    private ModuleResult calculateModuleResult(AppUser student, UUID moduleId) {
+        boolean dockerPassed = submissions.findByStudentAndModuleId(student, moduleId).stream()
+                .anyMatch(submission -> submission.getStatus() == SubmissionStatus.READY_FOR_REVIEW
+                        || submission.getStatus() == SubmissionStatus.APPROVED
+                        || submission.getStatus() == SubmissionStatus.PUBLISHED_FOR_BLACK_BOX);
+        List<Review> moduleReviews = reviews.findByReportAuthorAndReportModuleId(student, moduleId);
+        Integer whiteBoxScore = bestScore(moduleReviews, ReportType.WHITE_BOX);
+        Integer blackBoxScore = bestScore(moduleReviews, ReportType.BLACK_BOX);
+        Integer finalScore = dockerPassed && whiteBoxScore != null && blackBoxScore != null
+                ? Math.round((float) (whiteBoxScore * 0.45 + blackBoxScore * 0.55))
+                : null;
+        String status;
+        if (!dockerPassed) {
+            status = "DOCKER_REQUIRED";
+        } else if (whiteBoxScore == null || blackBoxScore == null) {
+            status = "IN_PROGRESS";
+        } else {
+            status = "COMPLETED";
+        }
+        return new ModuleResult(dockerPassed, whiteBoxScore, blackBoxScore, finalScore, status);
+    }
+
+    private String nullableCsvValue(Integer value) {
+        return value == null ? "" : value.toString();
+    }
+
+    private String csvValue(String value) {
+        String escaped = value == null ? "" : value.replace("\"", "\"\"");
+        return "\"" + escaped + "\"";
+    }
+
+    private record ModuleResult(
+            boolean dockerPassed,
+            Integer whiteBoxScore,
+            Integer blackBoxScore,
+            Integer finalScore,
+            String status) {
     }
 
     private CoreDtos.CourseResponse toCourseResponse(Course course) {

@@ -239,6 +239,21 @@ async function uploadReportAttachment(account: DemoAccount, reportId: string, fi
   return response.json() as Promise<ReportAttachment>;
 }
 
+async function downloadText(account: DemoAccount, path: string): Promise<string> {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    headers: {
+      Authorization: authHeader(account)
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(error?.message ?? `Ошибка API: ${response.status}`);
+  }
+
+  return response.text();
+}
+
 function StatusBadge({ value }: { value: string }) {
   return <span className="badge">{statusLabels[value] ?? value}</span>;
 }
@@ -567,6 +582,25 @@ function App() {
     }
   }
 
+  async function exportGrades(moduleId: string) {
+    setLoading(true);
+    setError(null);
+    try {
+      const csv = await downloadText(account, `/api/modules/${moduleId}/grades/export`);
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `pep-module-${moduleId}-grades.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setMessage("CSV с оценками сформирован.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось экспортировать оценки.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <main className="page">
       <section className="hero">
@@ -666,9 +700,11 @@ function App() {
 
       {account.role === "CURATOR" && (
         <CuratorDashboard
+          firstModule={labModule}
           submissions={state.submissions}
           validationJobs={state.validationJobs}
           reports={state.reports}
+          onExportGrades={exportGrades}
           onCompleteValidation={(jobId, passed) =>
             withRefresh(
               () =>
@@ -704,6 +740,7 @@ function App() {
           labs={state.labs}
           auditEvents={state.auditEvents}
           firstModule={labModule}
+          onExportGrades={exportGrades}
           onCreateLab={(submissionId) =>
             withRefresh(
               () =>
@@ -1101,15 +1138,19 @@ function StudentDashboard({
 }
 
 function CuratorDashboard({
+  firstModule,
   submissions,
   validationJobs,
   reports,
+  onExportGrades,
   onCompleteValidation,
   onCreateReview
 }: {
+  firstModule?: LearningModule;
   submissions: Submission[];
   validationJobs: ValidationJob[];
   reports: Report[];
+  onExportGrades: (moduleId: string) => Promise<void>;
   onCompleteValidation: (jobId: string, passed: boolean) => Promise<void>;
   onCreateReview: (payload: {
     reportId: string;
@@ -1144,6 +1185,13 @@ function CuratorDashboard({
 
       <article className="card">
         <h2>Curator: проверка отчетов</h2>
+        {firstModule && (
+          <div className="actions">
+            <button type="button" className="secondary" onClick={() => void onExportGrades(firstModule.id)}>
+              Экспорт оценок CSV
+            </button>
+          </div>
+        )}
         <EntityList
           title="Очередь отчетов"
           items={reports}
@@ -1252,6 +1300,7 @@ function AdminDashboard({
   labs,
   auditEvents,
   firstModule,
+  onExportGrades,
   onCreateLab,
   onDistribute
 }: {
@@ -1261,6 +1310,7 @@ function AdminDashboard({
   labs: Lab[];
   auditEvents: AuditEvent[];
   firstModule?: LearningModule;
+  onExportGrades: (moduleId: string) => Promise<void>;
   onCreateLab: (submissionId: string) => Promise<void>;
   onDistribute: (moduleId: string) => Promise<void>;
 }) {
@@ -1328,9 +1378,14 @@ function AdminDashboard({
           )}
         />
         {firstModule ? (
-          <button type="button" onClick={() => void onDistribute(firstModule.id)}>
-            Распределить black box цели
-          </button>
+          <div className="actions">
+            <button type="button" onClick={() => void onDistribute(firstModule.id)}>
+              Распределить black box цели
+            </button>
+            <button type="button" className="secondary" onClick={() => void onExportGrades(firstModule.id)}>
+              Экспорт оценок CSV
+            </button>
+          </div>
         ) : (
           <EmptyState>Нет активного модуля для распределения.</EmptyState>
         )}

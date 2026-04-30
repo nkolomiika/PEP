@@ -244,6 +244,13 @@ Response включает Kubernetes metadata и demo-команды:
 
 ## Reports
 
+### `GET /api/modules/{moduleId}/grades/export`
+
+Роль: куратор или администратор.
+
+Назначение: экспортировать оценки студентов по модулю в CSV. Колонки: `studentEmail`,
+`displayName`, `dockerPassed`, `whiteBoxScore`, `blackBoxScore`, `finalScore`, `status`.
+
 ### `POST /api/reports`
 
 Роль: студент.

@@ -1,12 +1,14 @@
 package ru.pep.platform.api;
 
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -268,6 +270,15 @@ class CorePlatformControllerTest {
                 .andExpect(jsonPath("$.blackBoxScore").value(80))
                 .andExpect(jsonPath("$.finalScore").value(nullValue()))
                 .andExpect(jsonPath("$.status").value("DOCKER_REQUIRED"));
+
+        mockMvc.perform(get("/api/modules/{moduleId}/grades/export", moduleId)
+                        .with(httpBasic("curator@pep.local", "curator")))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("text/csv"))
+                .andExpect(content().string(containsString("studentEmail,displayName,dockerPassed,whiteBoxScore,blackBoxScore,finalScore,status")))
+                .andExpect(content().string(containsString("\"student1@pep.local\"")))
+                .andExpect(content().string(containsString("\"student2@pep.local\"")))
+                .andExpect(content().string(containsString("false,,80,,\"DOCKER_REQUIRED\"")));
 
         mockMvc.perform(get("/api/audit")
                         .with(httpBasic("admin@pep.local", "admin")))

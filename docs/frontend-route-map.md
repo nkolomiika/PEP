@@ -26,6 +26,7 @@
 | `/curator/reviews` | Очередь проверки | Reports |
 | `/curator/reviews/:reportId` | Проверка отчета | Reviews |
 | `/curator/students/:studentId/progress` | Прогресс студента | Courses, reports |
+| `/curator/grades/export` | Экспорт оценок CSV | Module results |
 
 ## Admin routes
 
@@ -35,6 +36,7 @@
 | `/admin/groups` | Управление группами | Groups |
 | `/admin/labs` | Lab runtime | Labs |
 | `/admin/distribution` | Black box distribution | Assignments |
+| `/admin/grades/export` | Экспорт оценок CSV | Module results |
 | `/admin/audit` | Audit trail | Audit |
 
 ## Route guards

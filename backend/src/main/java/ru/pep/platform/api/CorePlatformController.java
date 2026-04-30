@@ -4,7 +4,10 @@ import jakarta.validation.Valid;
 import java.security.Principal;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -58,6 +61,16 @@ public class CorePlatformController {
     @PreAuthorize("hasRole('STUDENT')")
     public CoreDtos.ModuleResultResponse getModuleResult(Principal principal, @PathVariable UUID moduleId) {
         return platform.getModuleResult(principal.getName(), moduleId);
+    }
+
+    @GetMapping("/modules/{moduleId}/grades/export")
+    @PreAuthorize("hasAnyRole('CURATOR','ADMIN')")
+    public ResponseEntity<String> exportModuleGrades(Principal principal, @PathVariable UUID moduleId) {
+        String csv = platform.exportModuleGradesCsv(principal.getName(), moduleId);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"module-" + moduleId + "-grades.csv\"")
+                .contentType(new MediaType("text", "csv"))
+                .body(csv);
     }
 
     @PostMapping("/submissions")
