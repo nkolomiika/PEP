@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+
+kubectl apply -f deploy/k8s/lab-security-baseline.yaml
+kubectl apply -f deploy/k8s/lab-template.yaml
+kubectl get pods -n pep-labs-example

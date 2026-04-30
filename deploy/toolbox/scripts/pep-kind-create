@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+set -eu
+
+CLUSTER_NAME="${KIND_CLUSTER_NAME:-pep-local}"
+CONFIG_PATH="${KIND_CONFIG:-deploy/kind/cluster.yaml}"
+KUBECONFIG_PATH="${KUBECONFIG:-/kube/config}"
+TOOLBOX_CONTAINER="${TOOLBOX_CONTAINER_NAME:-pep-k8s-toolbox}"
+REGISTRY_CONTAINER="${REGISTRY_CONTAINER_NAME:-pep-local-registry}"
+
+mkdir -p "$(dirname "${KUBECONFIG_PATH}")"
+
+if ! kind get clusters | grep -qx "${CLUSTER_NAME}"; then
+  kind create cluster --name "${CLUSTER_NAME}" --config "${CONFIG_PATH}" --kubeconfig "${KUBECONFIG_PATH}"
+fi
+
+if docker network inspect kind >/dev/null 2>&1; then
+  docker network connect kind "${TOOLBOX_CONTAINER}" >/dev/null 2>&1 || true
+  if docker ps --format '{{.Names}}' | grep -qx "${REGISTRY_CONTAINER}"; then
+    docker network connect kind "${REGISTRY_CONTAINER}" >/dev/null 2>&1 || true
+  fi
+fi
+
+kind get kubeconfig --internal --name "${CLUSTER_NAME}" > "${KUBECONFIG_PATH}"
+kubectl cluster-info
+kubectl get nodes

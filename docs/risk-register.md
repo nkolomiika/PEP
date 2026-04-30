@@ -3,7 +3,7 @@
 | Риск | Вероятность | Влияние | Mitigation | Owner | Fallback |
 | --- | --- | --- | --- | --- | --- |
 | Docker Desktop не запущен | Medium | High | Pre-demo checklist | Admin | Показать recorded logs |
-| kind cluster не создается | Medium | High | Проверить версии заранее | Admin | Docker Compose demo |
+| Containerized kind cluster не создается | Medium | High | Проверить Docker socket, toolbox image и versions заранее | Admin | Docker Compose demo |
 | Local registry недоступен | Medium | High | Smoke test до защиты | Admin | Использовать уже pulled image |
 | Demo image не проходит validation | Medium | Medium | Хранить валидный tag | Developer | Показать сохраненный PASSED job |
 | Worker зависает | Medium | Medium | Timeout и recovery policy | Developer | Manual status update в demo data |

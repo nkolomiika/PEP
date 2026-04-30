@@ -5,7 +5,7 @@
 1. Тема и цель ВКР.
 2. Проблема обучения практической безопасности.
 3. Роли платформы: студент, куратор, администратор.
-4. Архитектура: Spring Boot, React, PostgreSQL, worker, kind.
+4. Архитектура: Spring Boot, React, PostgreSQL, worker, containerized kind.
 5. Учебный цикл: теория, white box, technical validation, black box, review.
 6. Безопасность и изоляция lab runtime.
 7. Demo flow.
@@ -28,15 +28,17 @@
 ```bash
 docker ps
 docker images
-kind get clusters
-kubectl get pods -A
-kubectl get svc -A
-kubectl port-forward svc/<lab-service> 8081:8080
+docker compose ps
+docker compose exec k8s-toolbox kind get clusters
+docker compose exec k8s-toolbox kubectl get pods -A
+docker compose exec k8s-toolbox kubectl get svc -A
+docker compose exec k8s-toolbox kubectl port-forward --address 0.0.0.0 svc/<lab-service> 8081:8080
 ```
 
 ## Ожидаемые вопросы
 
-**Почему kind?** Для повторяемой локальной демонстрации Kubernetes без внешней инфраструктуры.
+**Почему kind через toolbox container?** `kind` запускает Kubernetes-ноды как Docker containers, а
+toolbox убирает требование устанавливать `kind` и `kubectl` на host.
 
 **Почему image reference, а не загрузка исходного кода?** Это снижает сложность MVP и фокусирует платформу
 на technical validation и lab runtime.
@@ -49,5 +51,5 @@ NetworkPolicy, Pod Security и audit.
 
 ## Fallback
 
-Если kind недоступен, показать заранее подготовленные скриншоты, audit events, validation logs и
-запуск vulnerable app через Docker Compose.
+Если containerized kind недоступен, показать заранее подготовленные скриншоты, audit events,
+validation logs и запуск vulnerable app через Docker Compose.

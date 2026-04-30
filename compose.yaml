@@ -28,5 +28,28 @@ services:
     ports:
       - "5173:80"
 
+  registry:
+    image: registry:2
+    container_name: pep-local-registry
+    ports:
+      - "5001:5000"
+
+  k8s-toolbox:
+    build: ./deploy/toolbox
+    container_name: pep-k8s-toolbox
+    working_dir: /workspace
+    environment:
+      KUBECONFIG: /kube/config
+      KIND_CLUSTER_NAME: pep-local
+      TOOLBOX_CONTAINER_NAME: pep-k8s-toolbox
+      REGISTRY_CONTAINER_NAME: pep-local-registry
+    volumes:
+      - .:/workspace
+      - pep-kubeconfig:/kube
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "18080:18080"
+
 volumes:
   pep-postgres:
+  pep-kubeconfig:

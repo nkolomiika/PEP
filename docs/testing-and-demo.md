@@ -83,7 +83,7 @@
 - опубликовать модуль `A03. Injection`;
 - подготовить один валидный vulnerable app image;
 - подготовить один невалидный image reference для демонстрации ошибки;
-- поднять локальный `kind` cluster.
+- поднять containerized `kind` cluster через `k8s-toolbox`.
 - сверить готовность по `docs/demo-data-plan.md` и `docs/release-handoff-checklist.md`.
 
 Живая демонстрация:

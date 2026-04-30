@@ -36,8 +36,10 @@ Local demo gates:
 
 - backend image builds;
 - frontend image builds;
-- kind cluster can be created;
-- local registry is reachable;
+- `k8s-toolbox` image builds;
+- `docker compose config` passes;
+- kind cluster can be created from `k8s-toolbox`;
+- local registry container is reachable;
 - vulnerable demo image can be pulled;
 - lab pod reaches `Running`.
 

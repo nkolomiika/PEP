@@ -7,7 +7,7 @@
 - README описывает запуск.
 - Demo data подготовлены.
 - Vulnerable demo image доступен.
-- kind cluster smoke test выполнен.
+- Containerized kind smoke test выполнен через `k8s-toolbox`.
 - Audit trail для demo flow создан.
 - Fallback screenshots и logs сохранены.
 
@@ -28,9 +28,9 @@
 
 1. Установить Docker Desktop.
 2. Запустить local compose по README.
-3. Создать kind cluster по `docs/local-kind.md`.
-4. Поднять local registry.
-5. Подготовить demo image.
+3. Запустить `registry` и `k8s-toolbox`.
+4. Создать kind cluster по `docs/local-kind.md`.
+5. Подготовить demo image через toolbox.
 6. Загрузить demo data.
 7. Пройти demo script из `docs/defense-presentation.md`.
 

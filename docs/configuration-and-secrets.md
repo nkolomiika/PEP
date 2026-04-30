@@ -3,7 +3,7 @@
 ## Окружения
 
 - `local-compose` - backend, frontend, PostgreSQL без Kubernetes.
-- `local-kind` - lab runtime через kind и local registry.
+- `local-kind` - lab runtime через containerized kind, `k8s-toolbox` и local registry.
 - `test` - automated tests и contract checks.
 - `production-ready target` - внешние secrets, managed storage, hardened ingress.
 
@@ -33,6 +33,13 @@
 - `LAB_NAMESPACE_PREFIX`;
 - `STORAGE_ENDPOINT`;
 
+## Toolbox env vars
+
+- `KUBECONFIG=/kube/config`;
+- `KIND_CLUSTER_NAME=pep-local`;
+- `TOOLBOX_CONTAINER_NAME=pep-k8s-toolbox`;
+- `REGISTRY_CONTAINER_NAME=pep-local-registry`.
+
 ## `.env.example`
 
 Можно хранить:
@@ -56,6 +63,7 @@
 - Network access для lab по умолчанию минимален.
 - Debug logs не включаются вне local.
 - Upload size ограничен.
+- На host требуется только Docker; `kind` и `kubectl` запускаются внутри `k8s-toolbox`.
 
 ## Acceptance criteria
 

@@ -134,7 +134,7 @@
 ## Список демонстрационных материалов
 
 - скриншоты UI;
-- вывод `kubectl get pods`;
+- вывод `docker compose exec k8s-toolbox kubectl get pods`;
 - вывод `kubectl describe pod` с resource limits;
 - пример white box отчета;
 - пример black box отчета;

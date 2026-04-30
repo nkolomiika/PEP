@@ -1,14 +1,17 @@
 # Architecture decisions
 
-## ADR-001: локальный Kubernetes через kind
+## ADR-001: локальный Kubernetes через containerized kind
 
-Контекст: для защиты нужен повторяемый Kubernetes runtime без внешнего cloud.
+Контекст: для защиты нужен повторяемый Kubernetes runtime без внешнего cloud и без установки
+Kubernetes tooling на host.
 
-Решение: использовать `kind` и local registry.
+Решение: использовать `kind`, local registry и `k8s-toolbox` container с Docker CLI, `kind` и
+`kubectl`.
 
-Альтернативы: minikube, k3d, cloud cluster.
+Альтернативы: локально установленный `kind`, minikube, k3d, cloud cluster.
 
-Последствия: demo воспроизводим локально, но production ingress и managed security остаются после MVP.
+Последствия: demo воспроизводим локально, Kubernetes-ноды и tooling запускаются как containers, но
+toolbox получает доступ к Docker socket и не является production security pattern.
 
 ## ADR-002: submission через Docker image reference
 
@@ -34,7 +37,8 @@
 
 Контекст: ingress hardening требует дополнительных решений по TLS, routing и isolation.
 
-Решение: для защиты использовать `kubectl port-forward`.
+Решение: для защиты использовать `kubectl port-forward` из `k8s-toolbox` container с публикацией
+порта через Docker Compose.
 
 Альтернативы: Ingress Controller, NodePort, LoadBalancer.
 

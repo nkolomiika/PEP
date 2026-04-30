@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+
+CLUSTER_NAME="${KIND_CLUSTER_NAME:-pep-local}"
+KUBECONFIG_PATH="${KUBECONFIG:-/kube/config}"
+
+kind delete cluster --name "${CLUSTER_NAME}"
+rm -f "${KUBECONFIG_PATH}"

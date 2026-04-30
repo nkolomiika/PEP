@@ -105,12 +105,13 @@ Object storage хранит крупные артефакты:
 
 ## Kubernetes runtime
 
-Для дипломной демонстрации используется локальный Kubernetes через `kind`.
+Для дипломной демонстрации используется `kind`: Kubernetes-ноды запускаются как Docker containers,
+а управление `kind`/`kubectl` выполняется из `k8s-toolbox` container.
 
 Рекомендуемая модель:
 
-- локальный `kind` cluster;
-- local registry для images студентов;
+- containerized `kind` cluster;
+- local registry container для images студентов;
 - namespace для платформы;
 - namespace для лабораторий;
 - Deployment на каждый lab instance;

@@ -10,14 +10,14 @@
 - Submission через Docker image reference.
 - Technical-only validation.
 - White box report and review.
-- Lab runtime через local `kind`.
+- Lab runtime через containerized `kind` и `k8s-toolbox`.
 - Black box assignment and report.
 - Audit trail и базовые notifications.
 
 ## Не входит в MVP
 
 - Автоматическое доказательство эксплуатации уязвимости.
-- Source code upload и platform-side build.
+- Загрузка исходного кода и сборка image на стороне платформы.
 - Multi-cluster lab runtime.
 - Full image scanning.
 - LMS integration.
