@@ -89,7 +89,16 @@ public final class CoreDtos {
             ReportType type,
             String title,
             String contentMarkdown,
-            ReportStatus status) {
+            ReportStatus status,
+            List<ReportAttachmentResponse> attachments) {
+    }
+
+    public record ReportAttachmentResponse(
+            UUID id,
+            String originalFilename,
+            String contentType,
+            Long sizeBytes,
+            OffsetDateTime uploadedAt) {
     }
 
     public record CreateReviewRequest(

@@ -28,6 +28,8 @@ pep:
     default-cpu-limit: "500m"
     default-memory-limit: "512Mi"
     default-ttl-hours: 168
+  attachments:
+    storage-dir: ${PEP_ATTACHMENTS_STORAGE_DIR:var/report-attachments}
   validation-worker:
     enabled: ${PEP_VALIDATION_WORKER_ENABLED:false}
     poll-interval-ms: ${PEP_VALIDATION_WORKER_POLL_INTERVAL_MS:5000}

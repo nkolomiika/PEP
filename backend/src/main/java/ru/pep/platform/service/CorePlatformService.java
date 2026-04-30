@@ -1,9 +1,16 @@
 package ru.pep.platform.service;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 import ru.pep.platform.api.CoreDtos;
 import ru.pep.platform.domain.AppUser;
 import ru.pep.platform.domain.BlackBoxAssignment;
@@ -13,6 +20,7 @@ import ru.pep.platform.domain.LearningModule;
 import ru.pep.platform.domain.Lesson;
 import ru.pep.platform.domain.LessonProgress;
 import ru.pep.platform.domain.Report;
+import ru.pep.platform.domain.ReportAttachment;
 import ru.pep.platform.domain.Review;
 import ru.pep.platform.domain.ReportType;
 import ru.pep.platform.domain.Role;
@@ -27,6 +35,7 @@ import ru.pep.platform.repository.LabInstanceRepository;
 import ru.pep.platform.repository.LearningModuleRepository;
 import ru.pep.platform.repository.LessonProgressRepository;
 import ru.pep.platform.repository.LessonRepository;
+import ru.pep.platform.repository.ReportAttachmentRepository;
 import ru.pep.platform.repository.ReportRepository;
 import ru.pep.platform.repository.ReviewRepository;
 import ru.pep.platform.repository.SubmissionRepository;
@@ -48,7 +57,9 @@ public class CorePlatformService {
     private final BlackBoxAssignmentRepository assignments;
     private final LessonRepository lessons;
     private final LessonProgressRepository lessonProgress;
+    private final ReportAttachmentRepository reportAttachments;
     private final AuditService audit;
+    private final Path attachmentStorageDirectory;
 
     public CorePlatformService(
             AppUserRepository users,
@@ -62,7 +73,9 @@ public class CorePlatformService {
             BlackBoxAssignmentRepository assignments,
             LessonRepository lessons,
             LessonProgressRepository lessonProgress,
-            AuditService audit) {
+            ReportAttachmentRepository reportAttachments,
+            AuditService audit,
+            @Value("${pep.attachments.storage-dir:var/report-attachments}") String attachmentStorageDirectory) {
         this.users = users;
         this.courses = courses;
         this.modules = modules;
@@ -74,7 +87,9 @@ public class CorePlatformService {
         this.assignments = assignments;
         this.lessons = lessons;
         this.lessonProgress = lessonProgress;
+        this.reportAttachments = reportAttachments;
         this.audit = audit;
+        this.attachmentStorageDirectory = Path.of(attachmentStorageDirectory).toAbsolutePath().normalize();
     }
 
     @Transactional(readOnly = true)
@@ -239,6 +254,40 @@ public class CorePlatformService {
     }
 
     @Transactional
+    public CoreDtos.ReportAttachmentResponse uploadReportAttachment(String email, UUID reportId, MultipartFile file) {
+        AppUser user = currentUser(email);
+        Report report = reports.findById(reportId)
+                .orElseThrow(() -> new NotFoundException("Отчет не найден"));
+        assertCanReadReport(user, report);
+        if (file.isEmpty()) {
+            throw new ValidationException("Файл вложения пустой");
+        }
+
+        String originalFilename = normalizeFilename(file.getOriginalFilename());
+        String extension = extensionOf(originalFilename);
+        String storedFilename = report.getId() + "-" + UUID.randomUUID() + extension;
+        Path destination = attachmentStorageDirectory.resolve(storedFilename).normalize();
+
+        try {
+            Files.createDirectories(attachmentStorageDirectory);
+            try (InputStream input = file.getInputStream()) {
+                Files.copy(input, destination, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException exception) {
+            throw new StorageException("Не удалось сохранить вложение", exception);
+        }
+
+        ReportAttachment attachment = reportAttachments.save(new ReportAttachment(
+                report,
+                originalFilename,
+                destination.toString(),
+                normalizeContentType(file.getContentType()),
+                file.getSize()));
+        audit.record(user, "REPORT_ATTACHMENT_UPLOADED", "Report", report.getId(), "{\"attachmentId\":\"" + attachment.getId() + "\"}");
+        return toReportAttachmentResponse(attachment);
+    }
+
+    @Transactional
     public CoreDtos.ReviewResponse createReview(String email, CoreDtos.CreateReviewRequest request) {
         AppUser curator = currentUser(email);
         Report report = reports.findById(request.reportId())
@@ -373,11 +422,34 @@ public class CorePlatformService {
         }
     }
 
+    private void assertCanReadReport(AppUser user, Report report) {
+        if (user.getRole() == Role.STUDENT && !report.getAuthor().getId().equals(user.getId())) {
+            throw new AccessDeniedException("Нет доступа к чужому отчету");
+        }
+    }
+
     private String normalizeHealthPath(String healthPath) {
         if (healthPath == null || healthPath.isBlank()) {
             return "/health";
         }
         return healthPath.startsWith("/") ? healthPath : "/" + healthPath;
+    }
+
+    private String normalizeFilename(String filename) {
+        String normalized = filename == null || filename.isBlank() ? "attachment" : Path.of(filename).getFileName().toString();
+        return normalized.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    private String extensionOf(String filename) {
+        int extensionStart = filename.lastIndexOf('.');
+        if (extensionStart < 0 || extensionStart == filename.length() - 1) {
+            return "";
+        }
+        return filename.substring(extensionStart);
+    }
+
+    private String normalizeContentType(String contentType) {
+        return contentType == null || contentType.isBlank() ? "application/octet-stream" : contentType;
     }
 
     private String shortId(UUID id) {
@@ -446,7 +518,19 @@ public class CorePlatformService {
                 report.getType(),
                 report.getTitle(),
                 report.getContentMarkdown(),
-                report.getStatus());
+                report.getStatus(),
+                reportAttachments.findByReportOrderByUploadedAtAsc(report).stream()
+                        .map(this::toReportAttachmentResponse)
+                        .toList());
+    }
+
+    private CoreDtos.ReportAttachmentResponse toReportAttachmentResponse(ReportAttachment attachment) {
+        return new CoreDtos.ReportAttachmentResponse(
+                attachment.getId(),
+                attachment.getOriginalFilename(),
+                attachment.getContentType(),
+                attachment.getSizeBytes(),
+                attachment.getUploadedAt());
     }
 
     private CoreDtos.ReviewResponse toReviewResponse(Review review) {
@@ -501,6 +585,18 @@ public class CorePlatformService {
     public static class AccessDeniedException extends RuntimeException {
         public AccessDeniedException(String message) {
             super(message);
+        }
+    }
+
+    public static class ValidationException extends RuntimeException {
+        public ValidationException(String message) {
+            super(message);
+        }
+    }
+
+    public static class StorageException extends RuntimeException {
+        public StorageException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 }

@@ -23,9 +23,16 @@ public class ApiExceptionHandler {
         return error(HttpStatus.FORBIDDEN, "ACCESS_DENIED", exception.getMessage());
     }
 
-    @ExceptionHandler({MethodArgumentNotValidException.class, ConstraintViolationException.class})
+    @ExceptionHandler({
+            MethodArgumentNotValidException.class,
+            ConstraintViolationException.class,
+            CorePlatformService.ValidationException.class
+    })
     ResponseEntity<Map<String, String>> validationFailed(Exception exception) {
-        return error(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Проверьте заполненные поля");
+        String message = exception instanceof CorePlatformService.ValidationException
+                ? exception.getMessage()
+                : "Проверьте заполненные поля";
+        return error(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", message);
     }
 
     private ResponseEntity<Map<String, String>> error(HttpStatus status, String code, String message) {

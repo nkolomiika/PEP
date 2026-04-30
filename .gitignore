@@ -5,6 +5,7 @@
 **/dist/
 **/node_modules/
 **/tsconfig.tsbuildinfo
+**/var/report-attachments/
 
 .env
 .env.*

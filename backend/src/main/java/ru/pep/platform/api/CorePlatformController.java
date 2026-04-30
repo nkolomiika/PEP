@@ -11,8 +11,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 import ru.pep.platform.service.CorePlatformService;
 
 @RestController
@@ -107,6 +109,16 @@ public class CorePlatformController {
     @PreAuthorize("hasAnyRole('STUDENT','CURATOR','ADMIN')")
     public List<CoreDtos.ReportResponse> listReports(Principal principal) {
         return platform.listReports(principal.getName());
+    }
+
+    @PostMapping("/reports/{reportId}/attachments")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasAnyRole('STUDENT','CURATOR','ADMIN')")
+    public CoreDtos.ReportAttachmentResponse uploadReportAttachment(
+            Principal principal,
+            @PathVariable UUID reportId,
+            @RequestParam("file") MultipartFile file) {
+        return platform.uploadReportAttachment(principal.getName(), reportId, file);
     }
 
     @PostMapping("/reviews")

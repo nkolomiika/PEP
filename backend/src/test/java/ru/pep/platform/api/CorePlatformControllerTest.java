@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -130,10 +132,32 @@ class CorePlatformControllerTest {
                                 }
                                 """.formatted(moduleId, submissionId)))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.attachments", hasSize(0)))
                 .andExpect(jsonPath("$.status").value("SUBMITTED"))
                 .andReturn();
 
         String reportId = objectMapper.readTree(reportResult.getResponse().getContentAsString()).get("id").asText();
+
+        MockMultipartFile evidence = new MockMultipartFile(
+                "file",
+                "sqli-evidence.txt",
+                MediaType.TEXT_PLAIN_VALUE,
+                "Payload and response body".getBytes());
+
+        mockMvc.perform(multipart("/api/reports/{reportId}/attachments", reportId)
+                        .file(evidence)
+                        .with(httpBasic("student1@pep.local", "student")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.originalFilename").value("sqli-evidence.txt"))
+                .andExpect(jsonPath("$.contentType").value(MediaType.TEXT_PLAIN_VALUE))
+                .andExpect(jsonPath("$.sizeBytes").value(25));
+
+        mockMvc.perform(get("/api/reports")
+                        .with(httpBasic("student1@pep.local", "student")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].attachments", hasSize(1)))
+                .andExpect(jsonPath("$[0].attachments[0].originalFilename").value("sqli-evidence.txt"));
 
         mockMvc.perform(post("/api/reviews")
                         .with(httpBasic("curator@pep.local", "curator"))

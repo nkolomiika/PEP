@@ -57,7 +57,9 @@
 ## Report UX
 
 - Формы white box и black box отчетов показывают markdown preview до отправки.
+- Формы white box и black box отчетов позволяют приложить файл evidence.
 - Куратор видит report content и preview своего feedback в формате markdown.
+- Куратор видит список вложений, приложенных к отчету.
 
 ## Acceptance criteria
 

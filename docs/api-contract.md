@@ -244,6 +244,33 @@ Response включает Kubernetes metadata и demo-команды:
 
 ## Reports
 
+### `POST /api/reports`
+
+Роль: студент.
+
+Назначение: отправить white box или black box отчет в формате markdown.
+
+`ReportResponse` включает `attachments` - список метаданных загруженных вложений:
+
+```json
+[
+  {
+    "id": "uuid",
+    "originalFilename": "sqli-evidence.txt",
+    "contentType": "text/plain",
+    "sizeBytes": 25,
+    "uploadedAt": "2026-04-30T12:00:00Z"
+  }
+]
+```
+
+### `POST /api/reports/{reportId}/attachments`
+
+Роль: студент, куратор или администратор.
+
+Назначение: загрузить файл evidence к отчету через `multipart/form-data` поле `file`. Студент может
+добавлять вложения только к своим отчетам; куратор и администратор видят вложения в очереди проверки.
+
 ### `POST /api/reports/black-box`
 
 Роль: студент.

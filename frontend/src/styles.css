@@ -242,6 +242,22 @@ pre {
   padding: 0;
 }
 
+.attachment-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+}
+
+.attachment-list li {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
 .lesson-layout {
   display: grid;
   gap: 16px;

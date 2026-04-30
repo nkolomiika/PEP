@@ -72,6 +72,14 @@ type ValidationJob = {
   errorMessage?: string;
 };
 
+type ReportAttachment = {
+  id: string;
+  originalFilename: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadedAt: string;
+};
+
 type Report = {
   id: string;
   authorEmail: string;
@@ -82,6 +90,7 @@ type Report = {
   title: string;
   contentMarkdown: string;
   status: string;
+  attachments: ReportAttachment[];
 };
 
 type Review = {
@@ -208,6 +217,26 @@ async function apiRequest<T>(account: DemoAccount, path: string, init?: RequestI
   }
 
   return response.json() as Promise<T>;
+}
+
+async function uploadReportAttachment(account: DemoAccount, reportId: string, file: File): Promise<ReportAttachment> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(`${apiBaseUrl}/api/reports/${reportId}/attachments`, {
+    method: "POST",
+    headers: {
+      Authorization: authHeader(account)
+    },
+    body: formData
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(error?.message ?? `Ошибка API: ${response.status}`);
+  }
+
+  return response.json() as Promise<ReportAttachment>;
 }
 
 function StatusBadge({ value }: { value: string }) {
@@ -346,6 +375,35 @@ function renderInlineMarkdown(text: string) {
     }
     return part;
   });
+}
+
+function ReportAttachmentsList({ attachments }: { attachments: ReportAttachment[] }) {
+  if (attachments.length === 0) {
+    return <p className="muted">Вложений нет.</p>;
+  }
+
+  return (
+    <ul className="attachment-list">
+      {attachments.map((attachment) => (
+        <li key={attachment.id}>
+          <strong>{attachment.originalFilename}</strong>
+          <span className="muted">
+            {attachment.contentType}, {formatBytes(attachment.sizeBytes)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function formatBytes(sizeBytes: number) {
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`;
+  }
+  if (sizeBytes < 1024 * 1024) {
+    return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function App() {
@@ -590,12 +648,17 @@ function App() {
           }
           onCreateReport={(payload) =>
             withRefresh(
-              () =>
-                apiRequest(account, "/api/reports", {
+              async () => {
+                const { attachment, ...reportPayload } = payload;
+                const report = await apiRequest<Report>(account, "/api/reports", {
                   method: "POST",
-                  body: JSON.stringify(payload)
-                }),
-              "Отчет отправлен куратору."
+                  body: JSON.stringify(reportPayload)
+                });
+                if (attachment) {
+                  await uploadReportAttachment(account, report.id, attachment);
+                }
+              },
+              payload.attachment ? "Отчет и вложение отправлены куратору." : "Отчет отправлен куратору."
             )
           }
         />
@@ -750,13 +813,16 @@ function StudentDashboard({
     type: ReportType;
     title: string;
     contentMarkdown: string;
+    attachment?: File | null;
   }) => Promise<void>;
 }) {
   const [imageReference, setImageReference] = useState("localhost:5001/vulnerable-sqli-demo:latest");
   const [reportText, setReportText] = useState("Payload: ' OR '1'='1\nEvidence: login bypass воспроизводится.");
+  const [reportAttachment, setReportAttachment] = useState<File | null>(null);
   const [blackBoxReportText, setBlackBoxReportText] = useState(
     "Target: назначенный lab\nPayload: ' OR '1'='1\nEvidence: результат поиска раскрывает лишние данные."
   );
+  const [blackBoxReportAttachment, setBlackBoxReportAttachment] = useState<File | null>(null);
   const latestSubmission = submissions.find((submission) => submission.moduleId === selectedModule?.id);
   const completedLessonIds = useMemo(
     () => new Set(lessonProgress.filter((item) => item.completed).map((item) => item.lessonId)),
@@ -914,7 +980,8 @@ function StudentDashboard({
                 submissionId: latestSubmission.id,
                 type: "WHITE_BOX",
                 title: "White box отчет по SQL Injection",
-                contentMarkdown: reportText
+                contentMarkdown: reportText,
+                attachment: reportAttachment
               });
             }}
           >
@@ -929,6 +996,17 @@ function StudentDashboard({
               <strong>Preview отчета</strong>
               <MarkdownPreview source={reportText} />
             </div>
+            <label htmlFor="reportAttachment">Вложение с evidence (опционально)</label>
+            <input
+              id="reportAttachment"
+              type="file"
+              onChange={(event) => setReportAttachment(event.target.files?.[0] ?? null)}
+            />
+            {reportAttachment && (
+              <p className="muted">
+                Выбрано: {reportAttachment.name} ({formatBytes(reportAttachment.size)})
+              </p>
+            )}
             <button type="submit">Отправить отчет куратору</button>
           </form>
         )}
@@ -950,6 +1028,7 @@ function StudentDashboard({
             <>
               <strong>{report.title}</strong>
               <StatusBadge value={report.status} />
+              <ReportAttachmentsList attachments={report.attachments} />
               {reviewsByReportId.has(report.id) ? (
                 <div className="review-box feedback-box">
                   <strong>Feedback куратора</strong>
@@ -983,7 +1062,8 @@ function StudentDashboard({
                       blackBoxAssignmentId: assignment.id,
                       type: "BLACK_BOX",
                       title: "Black box отчет по SQL Injection",
-                      contentMarkdown: blackBoxReportText
+                      contentMarkdown: blackBoxReportText,
+                      attachment: blackBoxReportAttachment
                     });
                   }}
                 >
@@ -998,6 +1078,17 @@ function StudentDashboard({
                     <strong>Preview black box отчета</strong>
                     <MarkdownPreview source={blackBoxReportText} />
                   </div>
+                  <label htmlFor={`blackBoxAttachment-${assignment.id}`}>Вложение с evidence (опционально)</label>
+                  <input
+                    id={`blackBoxAttachment-${assignment.id}`}
+                    type="file"
+                    onChange={(event) => setBlackBoxReportAttachment(event.target.files?.[0] ?? null)}
+                  />
+                  {blackBoxReportAttachment && (
+                    <p className="muted">
+                      Выбрано: {blackBoxReportAttachment.name} ({formatBytes(blackBoxReportAttachment.size)})
+                    </p>
+                  )}
                   <button type="submit">Отправить black box отчет</button>
                 </form>
               )}
@@ -1127,6 +1218,7 @@ function ReviewForm({
         </div>
       )}
       <MarkdownPreview source={report.contentMarkdown} />
+      <ReportAttachmentsList attachments={report.attachments} />
       <label htmlFor={`decision-${report.id}`}>Решение</label>
       <select id={`decision-${report.id}`} value={decision} onChange={(event) => setDecision(event.target.value as ReviewDecision)}>
         <option value="APPROVED">Принять</option>
