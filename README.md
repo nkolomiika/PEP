@@ -99,7 +99,8 @@ docker compose up --build
 - backend API: `http://localhost:8080`
 - health endpoint: `http://localhost:8080/actuator/health`
 
-Этот режим нужен для разработки интерфейса, API и основной бизнес-логики.
+В этом режиме backend также запускает demo worker для technical validation: он использует Docker socket
+хоста, скачивает отправленный image, временно запускает container и проверяет port/health endpoint.
 
 ## Запуск lab runtime через containerized kind
 

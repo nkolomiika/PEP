@@ -63,6 +63,23 @@ public class ValidationJob {
         createdAt = OffsetDateTime.now();
     }
 
+    public void markPullingImage() {
+        this.status = ValidationJobStatus.PULLING_IMAGE;
+        this.startedAt = OffsetDateTime.now();
+    }
+
+    public void markStartingContainer() {
+        this.status = ValidationJobStatus.STARTING_CONTAINER;
+    }
+
+    public void markCheckingPort() {
+        this.status = ValidationJobStatus.CHECKING_PORT;
+    }
+
+    public void markCheckingHealth() {
+        this.status = ValidationJobStatus.CHECKING_HEALTH;
+    }
+
     public void pass(String logsUri) {
         this.status = ValidationJobStatus.PASSED;
         this.logsUri = logsUri;

@@ -28,3 +28,9 @@ pep:
     default-cpu-limit: "500m"
     default-memory-limit: "512Mi"
     default-ttl-hours: 168
+  validation-worker:
+    enabled: ${PEP_VALIDATION_WORKER_ENABLED:false}
+    poll-interval-ms: ${PEP_VALIDATION_WORKER_POLL_INTERVAL_MS:5000}
+    host-address: ${PEP_VALIDATION_WORKER_HOST_ADDRESS:host.docker.internal}
+    command-timeout-seconds: ${PEP_VALIDATION_WORKER_COMMAND_TIMEOUT_SECONDS:120}
+    health-timeout-seconds: ${PEP_VALIDATION_WORKER_HEALTH_TIMEOUT_SECONDS:30}

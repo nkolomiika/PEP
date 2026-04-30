@@ -12,14 +12,21 @@ services:
 
   backend:
     build: ./backend
+    user: root
     environment:
       PEP_DATABASE_URL: jdbc:postgresql://postgres:5432/pep
       PEP_DATABASE_USERNAME: pep
       PEP_DATABASE_PASSWORD: pep
+      PEP_VALIDATION_WORKER_ENABLED: "true"
+      PEP_VALIDATION_WORKER_HOST_ADDRESS: host.docker.internal
     depends_on:
       - postgres
     ports:
       - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   frontend:
     build: ./frontend
