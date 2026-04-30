@@ -14,6 +14,8 @@ SAFE_ID="$(printf '%s' "${LAB_ID}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-
 NAMESPACE="pep-lab-${SAFE_ID}"
 APP_NAME="lab-${SAFE_ID}"
 SERVICE_NAME="svc-${SAFE_ID}"
+INGRESS_NAME="ing-${SAFE_ID}"
+INGRESS_HOST="lab-${SAFE_ID}.127.0.0.1.nip.io"
 
 RUNTIME_IMAGE="${IMAGE_REFERENCE}"
 case "${RUNTIME_IMAGE}" in
@@ -119,16 +121,37 @@ spec:
   ports:
     - port: ${APPLICATION_PORT}
       targetPort: ${APPLICATION_PORT}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${INGRESS_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: ${INGRESS_HOST}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ${SERVICE_NAME}
+                port:
+                  number: ${APPLICATION_PORT}
 EOF
 
 kubectl rollout status "deployment/${APP_NAME}" -n "${NAMESPACE}" --timeout=120s
-kubectl get pods,svc -n "${NAMESPACE}"
+kubectl get pods,svc,ingress -n "${NAMESPACE}"
 
 cat <<EOF
 Lab deployed.
 Namespace: ${NAMESPACE}
 Deployment: ${APP_NAME}
 Service: ${SERVICE_NAME}
+Ingress:
+http://${INGRESS_HOST}:8088
 Port-forward:
 kubectl port-forward --address 0.0.0.0 -n ${NAMESPACE} service/${SERVICE_NAME} 18080:${APPLICATION_PORT}
 EOF

@@ -156,7 +156,9 @@ public final class CoreDtos {
             String deploymentName,
             String serviceName,
             String routeUrl,
+            String ingressUrl,
             String deployCommand,
+            String ingressInstallCommand,
             String portForwardCommand,
             LabStatus status,
             OffsetDateTime expiresAt) {

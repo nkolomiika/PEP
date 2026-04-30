@@ -41,6 +41,7 @@
 
 Admin dashboard показывает количество approved submissions, labs без созданного instance, running labs,
 статусы lab instances, namespace/service metadata, команды deploy/port-forward и срок жизни lab.
+Для lab runtime Admin dashboard также показывает ingress URL и команду установки ingress controller.
 
 ## Progress Charts
 

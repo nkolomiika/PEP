@@ -606,8 +606,11 @@ public class CorePlatformService {
 
     private CoreDtos.LabResponse toLabResponse(LabInstance lab) {
         Submission submission = lab.getSubmission();
+        String shortSubmissionId = shortId(submission.getId());
+        String ingressUrl = "http://lab-" + shortSubmissionId + ".127.0.0.1.nip.io:8088";
         String deployCommand = "docker compose exec k8s-toolbox pep-lab-deploy "
                 + submission.getId() + " " + submission.getImageReference() + " " + submission.getApplicationPort();
+        String ingressInstallCommand = "docker compose exec k8s-toolbox pep-ingress-install";
         String portForwardCommand = "docker compose exec k8s-toolbox pep-lab-forward "
                 + submission.getId() + " " + submission.getApplicationPort() + " 18080";
         return new CoreDtos.LabResponse(
@@ -619,7 +622,9 @@ public class CorePlatformService {
                 lab.getDeploymentName(),
                 lab.getServiceName(),
                 lab.getRouteUrl(),
+                ingressUrl,
                 deployCommand,
+                ingressInstallCommand,
                 portForwardCommand,
                 lab.getStatus(),
                 lab.getExpiresAt());

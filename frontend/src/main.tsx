@@ -136,7 +136,9 @@ type Lab = {
   deploymentName: string;
   serviceName: string;
   routeUrl: string;
+  ingressUrl: string;
   deployCommand: string;
+  ingressInstallCommand: string;
   portForwardCommand: string;
   status: string;
   expiresAt: string;
@@ -1600,10 +1602,14 @@ function AdminDashboard({
               <StatusBadge value={lab.status} />
               <p className="muted">Student: {lab.studentEmail}</p>
               <p className="muted">Image: {lab.imageReference}</p>
+              <p className="muted">Ingress URL:</p>
+              <code>{lab.ingressUrl}</code>
               <p className="muted">
                 {lab.namespace} / {lab.serviceName}
               </p>
               <p className="muted">Expires: {new Date(lab.expiresAt).toLocaleString("ru-RU")}</p>
+              <p className="muted">Install ingress controller:</p>
+              <code>{lab.ingressInstallCommand}</code>
               <p className="muted">Deploy в kind:</p>
               <code>{lab.deployCommand}</code>
               <p className="muted">Port-forward:</p>

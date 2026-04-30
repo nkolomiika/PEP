@@ -227,7 +227,9 @@ Response включает Kubernetes metadata и demo-команды:
   "deploymentName": "lab-12345678",
   "serviceName": "svc-12345678",
   "routeUrl": "http://localhost:18080",
+  "ingressUrl": "http://lab-12345678.127.0.0.1.nip.io:8088",
   "deployCommand": "docker compose exec k8s-toolbox pep-lab-deploy <submissionId> <image> <port>",
+  "ingressInstallCommand": "docker compose exec k8s-toolbox pep-ingress-install",
   "portForwardCommand": "docker compose exec k8s-toolbox pep-lab-forward <submissionId> <port> 18080",
   "status": "RUNNING"
 }

@@ -96,13 +96,13 @@ docker compose exec k8s-toolbox pep-lab-deploy <submissionId> localhost:5001/vul
 `submissionId` берется из ответа `POST /api/labs` или из команды `deployCommand`, которую показывает
 Admin dashboard. Script преобразует `localhost:5001/...` в internal registry reference
 `pep-local-registry:5000/...`, создает namespace `pep-lab-<submissionId-prefix>`, deployment,
-service, resource quota и limits.
+service, ingress, resource quota и limits.
 
 Admin dashboard также показывает сводку lab runtime: сколько approved submissions готовы к lab,
 сколько еще без lab instance, сколько labs в `RUNNING`, статусы созданных labs, namespace/service
-metadata, команды deploy/port-forward и срок жизни lab.
+metadata, команды deploy/ingress/port-forward и срок жизни lab.
 
-Ожидаемый результат: lab pod находится в состоянии `Running`, а `kubectl get pods,svc -n
+Ожидаемый результат: lab pod находится в состоянии `Running`, а `kubectl get pods,svc,ingress -n
 pep-lab-<submissionId-prefix>` показывает deployment и service.
 
 Для удаления lab:
@@ -111,7 +111,27 @@ pep-lab-<submissionId-prefix>` показывает deployment и service.
 docker compose exec k8s-toolbox pep-lab-delete <submissionId>
 ```
 
-## Открытие lab
+## Открытие lab через ingress
+
+Перед первым открытием установить ingress controller:
+
+```powershell
+docker compose exec k8s-toolbox pep-ingress-install
+```
+
+После `pep-lab-deploy` открыть ingress URL из Admin dashboard:
+
+```text
+http://lab-<submissionId-prefix>.127.0.0.1.nip.io:8088
+```
+
+Проверить health endpoint:
+
+```powershell
+Invoke-WebRequest http://lab-<submissionId-prefix>.127.0.0.1.nip.io:8088/health
+```
+
+## Открытие lab через port-forward fallback
 
 ```powershell
 docker compose exec k8s-toolbox pep-lab-forward <submissionId> 8080 18080

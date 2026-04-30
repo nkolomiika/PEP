@@ -130,10 +130,17 @@ docker compose exec k8s-toolbox docker push localhost:5001/vulnerable-sqli-demo:
 Развернуть lab для принятой submission:
 
 ```powershell
+docker compose exec k8s-toolbox pep-ingress-install
 docker compose exec k8s-toolbox pep-lab-deploy <submissionId> localhost:5001/vulnerable-sqli-demo:latest 8080
 ```
 
-Открыть lab через port-forward:
+Открыть lab через ingress URL:
+
+```text
+http://lab-<submissionId-prefix>.127.0.0.1.nip.io:8088
+```
+
+Port-forward остается fallback-вариантом:
 
 ```powershell
 docker compose exec k8s-toolbox pep-lab-forward <submissionId> 8080 18080

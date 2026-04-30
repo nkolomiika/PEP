@@ -48,8 +48,9 @@ flowchart TD
 4. Опубликовать тестовый vulnerable app image в local registry.
 5. Применить Kubernetes manifests из toolbox container.
 6. Запустить техническую проверку image.
-7. Опубликовать lab instance.
-8. Открыть lab через port-forward из toolbox container.
+7. Установить ingress controller.
+8. Опубликовать lab instance.
+9. Открыть lab через ingress URL из toolbox/Admin dashboard.
 
 ## Запуск toolbox и registry
 
@@ -117,7 +118,7 @@ Backend может хранить исходный user-facing reference и inte
 docker compose exec k8s-toolbox pep-lab-deploy <submissionId> localhost:5001/vulnerable-sqli-demo:latest 8080
 ```
 
-`pep-lab-deploy` создает isolated namespace, quota, limits, deployment и service для конкретной
+`pep-lab-deploy` создает isolated namespace, quota, limits, deployment, service и ingress для конкретной
 submission. Для images из local registry script автоматически заменяет user-facing reference
 `localhost:5001/...` на internal reference `pep-local-registry:5000/...`, доступный из `kind`.
 
@@ -126,12 +127,24 @@ submission. Для images из local registry script автоматически 
 ```powershell
 docker compose exec k8s-toolbox kubectl get ns
 docker compose exec k8s-toolbox kubectl get resourcequota -n pep-lab-<submissionId-prefix>
-docker compose exec k8s-toolbox kubectl get pods,svc -n pep-lab-<submissionId-prefix>
+docker compose exec k8s-toolbox kubectl get pods,svc,ingress -n pep-lab-<submissionId-prefix>
 ```
 
 ## Доступ к lab
 
-Для MVP достаточно port-forward:
+Установить ingress controller:
+
+```powershell
+docker compose exec k8s-toolbox pep-ingress-install
+```
+
+После `pep-lab-deploy` lab открывается через ingress URL:
+
+```text
+http://lab-<submissionId-prefix>.127.0.0.1.nip.io:8088
+```
+
+Port-forward остается fallback-вариантом:
 
 ```powershell
 docker compose exec k8s-toolbox pep-lab-forward <submissionId> 8080 18080
@@ -142,8 +155,6 @@ docker compose exec k8s-toolbox pep-lab-forward <submissionId> 8080 18080
 ```text
 http://localhost:18080
 ```
-
-Ingress можно добавить после того, как базовый сценарий port-forward стабильно работает.
 
 ## Troubleshooting для Windows
 

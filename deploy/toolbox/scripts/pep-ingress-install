@@ -1,0 +1,24 @@
+#!/usr/bin/env sh
+set -eu
+
+INGRESS_VERSION="${INGRESS_NGINX_VERSION:-controller-v1.11.2}"
+
+kubectl apply -f "https://raw.githubusercontent.com/kubernetes/ingress-nginx/${INGRESS_VERSION}/deploy/static/provider/kind/deploy.yaml"
+kubectl wait --namespace ingress-nginx \
+  --for=condition=ready pod \
+  --selector=app.kubernetes.io/component=controller \
+  --timeout=180s
+
+kubectl -n ingress-nginx patch service ingress-nginx-controller \
+  --type='json' \
+  -p='[
+    {"op":"replace","path":"/spec/type","value":"NodePort"},
+    {"op":"replace","path":"/spec/ports/0/nodePort","value":30080},
+    {"op":"replace","path":"/spec/ports/1/nodePort","value":30443}
+  ]'
+
+cat <<EOF
+Ingress controller is ready.
+HTTP entrypoint: http://localhost:8088
+HTTPS entrypoint: https://localhost:8443
+EOF
