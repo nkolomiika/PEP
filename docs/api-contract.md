@@ -147,7 +147,10 @@ Response:
   "submissionId": "uuid",
   "status": "CHECKING_PORT",
   "logsUri": "s3://pep/logs/job.log",
-  "errorMessage": null
+  "errorMessage": null,
+  "imageScanStatus": "WARNINGS",
+  "imageScanSummary": "Image запускается от root; application port не объявлен в EXPOSE;",
+  "imageScanReport": "Baseline image scan..."
 }
 ```
 
@@ -160,6 +163,11 @@ Response:
 - `CHECKING_HEALTH`;
 - `PASSED`;
 - `FAILED`.
+
+`imageScanStatus` не блокирует technical validation и показывает результат baseline image scan:
+`PASSED`, `WARNINGS` или `FAILED`. MVP scan использует `docker image inspect`, проверяет запуск от root
+и наличие `EXPOSE` для application port. Полноценный CVE scanner остается задачей production-ready
+версии.
 
 ## Reviews
 

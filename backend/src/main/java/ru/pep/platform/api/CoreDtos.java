@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.UUID;
 import ru.pep.platform.domain.CourseStatus;
 import ru.pep.platform.domain.BlackBoxAssignmentStatus;
+import ru.pep.platform.domain.ImageScanStatus;
 import ru.pep.platform.domain.LabStatus;
 import ru.pep.platform.domain.ModuleStatus;
 import ru.pep.platform.domain.ReportStatus;
@@ -65,7 +66,10 @@ public final class CoreDtos {
             String imageReference,
             ValidationJobStatus status,
             String logsUri,
-            String errorMessage) {
+            String errorMessage,
+            ImageScanStatus imageScanStatus,
+            String imageScanSummary,
+            String imageScanReport) {
     }
 
     public record CompleteValidationRequest(boolean passed, String logsUri, String errorMessage) {

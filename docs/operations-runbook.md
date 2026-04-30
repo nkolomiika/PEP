@@ -36,6 +36,10 @@ Backend container в demo-compose запускает technical validation worker
 хоста только для технической проверки image: `docker pull`, временный `docker run`, проверка port и
 `healthPath`, затем cleanup временного container.
 
+После `docker pull` worker также выполняет baseline image scan через `docker image inspect`. Scan не
+блокирует сдачу, но показывает в UI предупреждения, если image запускается от root или не объявляет
+`EXPOSE` для application port. Полноценный CVE scanner остается production-ready расширением.
+
 ## Запуск toolbox и local registry
 
 ```powershell

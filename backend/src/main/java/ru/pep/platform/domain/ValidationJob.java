@@ -37,6 +37,19 @@ public class ValidationJob {
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "image_scan_status", length = 32)
+    private ImageScanStatus imageScanStatus;
+
+    @Column(name = "image_scan_summary", columnDefinition = "TEXT")
+    private String imageScanSummary;
+
+    @Column(name = "image_scan_report", columnDefinition = "TEXT")
+    private String imageScanReport;
+
+    @Column(name = "image_scan_finished_at")
+    private OffsetDateTime imageScanFinishedAt;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 
@@ -80,6 +93,27 @@ public class ValidationJob {
         this.status = ValidationJobStatus.CHECKING_HEALTH;
     }
 
+    public void markImageScanPassed(String summary, String report) {
+        this.imageScanStatus = ImageScanStatus.PASSED;
+        this.imageScanSummary = summary;
+        this.imageScanReport = report;
+        this.imageScanFinishedAt = OffsetDateTime.now();
+    }
+
+    public void markImageScanWarnings(String summary, String report) {
+        this.imageScanStatus = ImageScanStatus.WARNINGS;
+        this.imageScanSummary = summary;
+        this.imageScanReport = report;
+        this.imageScanFinishedAt = OffsetDateTime.now();
+    }
+
+    public void markImageScanFailed(String summary, String report) {
+        this.imageScanStatus = ImageScanStatus.FAILED;
+        this.imageScanSummary = summary;
+        this.imageScanReport = report;
+        this.imageScanFinishedAt = OffsetDateTime.now();
+    }
+
     public void pass(String logsUri) {
         this.status = ValidationJobStatus.PASSED;
         this.logsUri = logsUri;
@@ -116,5 +150,17 @@ public class ValidationJob {
 
     public String getErrorMessage() {
         return errorMessage;
+    }
+
+    public ImageScanStatus getImageScanStatus() {
+        return imageScanStatus;
+    }
+
+    public String getImageScanSummary() {
+        return imageScanSummary;
+    }
+
+    public String getImageScanReport() {
+        return imageScanReport;
     }
 }

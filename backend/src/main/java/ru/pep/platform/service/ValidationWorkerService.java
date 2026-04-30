@@ -63,6 +63,7 @@ public class ValidationWorkerService {
     private void validate(java.util.UUID jobId, String containerName) {
         JobSnapshot snapshot = markPullingImage(jobId);
         runCommand(List.of("docker", "pull", snapshot.imageReference()));
+        scanImage(jobId, snapshot);
 
         markStartingContainer(jobId);
         runCommand(List.of(
@@ -86,6 +87,51 @@ public class ValidationWorkerService {
         }
 
         passJob(jobId);
+    }
+
+    private void scanImage(java.util.UUID jobId, JobSnapshot snapshot) {
+        try {
+            CommandResult result = runCommand(List.of(
+                    "docker",
+                    "image",
+                    "inspect",
+                    snapshot.imageReference(),
+                    "--format",
+                    "User={{.Config.User}}\nExposedPorts={{json .Config.ExposedPorts}}\nSize={{.Size}}"));
+            ImageScanResult scan = analyzeImageInspect(snapshot, result.output());
+            updateJob(jobId, job -> {
+                if (scan.hasWarnings()) {
+                    job.markImageScanWarnings(scan.summary(), scan.report());
+                } else {
+                    job.markImageScanPassed(scan.summary(), scan.report());
+                }
+            });
+        } catch (RuntimeException exception) {
+            updateJob(jobId, job -> job.markImageScanFailed("Image scan не выполнен", sanitizeOutput(exception.getMessage())));
+        }
+    }
+
+    private ImageScanResult analyzeImageInspect(JobSnapshot snapshot, String inspectOutput) {
+        boolean rootUser = inspectOutput.lines()
+                .filter(line -> line.startsWith("User="))
+                .map(line -> line.substring("User=".length()).trim())
+                .findFirst()
+                .map(user -> user.isBlank() || "root".equals(user) || "0".equals(user))
+                .orElse(true);
+        boolean exposesApplicationPort = inspectOutput.contains("\"" + snapshot.applicationPort() + "/tcp\"");
+
+        StringBuilder summary = new StringBuilder();
+        if (rootUser) {
+            summary.append("Image запускается от root; ");
+        }
+        if (!exposesApplicationPort) {
+            summary.append("application port не объявлен в EXPOSE; ");
+        }
+        if (summary.isEmpty()) {
+            summary.append("Базовый image scan не выявил предупреждений.");
+        }
+        String report = "Baseline image scan\n" + inspectOutput.strip();
+        return new ImageScanResult(summary.toString().strip(), report, rootUser || !exposesApplicationPort);
     }
 
     private JobSnapshot markPullingImage(java.util.UUID jobId) {
@@ -211,6 +257,9 @@ public class ValidationWorkerService {
     }
 
     private record CommandResult(String output) {
+    }
+
+    private record ImageScanResult(String summary, String report, boolean hasWarnings) {
     }
 
     private record JobSnapshot(String imageReference, Integer applicationPort, String healthPath) {

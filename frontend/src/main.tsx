@@ -70,6 +70,9 @@ type ValidationJob = {
   status: string;
   logsUri?: string;
   errorMessage?: string;
+  imageScanStatus?: string;
+  imageScanSummary?: string;
+  imageScanReport?: string;
 };
 
 type ReportAttachment = {
@@ -182,6 +185,7 @@ const statusLabels: Record<string, string> = {
   QUEUED: "В очереди",
   PASSED: "Проверка пройдена",
   FAILED: "Проверка завершилась ошибкой",
+  WARNINGS: "Есть предупреждения",
   SUBMITTED: "Отправлен",
   RUNNING: "Запущен",
   ASSIGNED: "Назначено",
@@ -452,6 +456,26 @@ function StatusDistribution({ title, counts }: { title: string; counts: Record<s
         entries.map(([status, count]) => (
           <ProgressBar key={status} label={statusLabels[status] ?? status} value={count} total={total} />
         ))
+      )}
+    </div>
+  );
+}
+
+function ImageScanSummary({ job }: { job: ValidationJob }) {
+  if (!job.imageScanStatus) {
+    return <p className="muted">Image scan еще не выполнялся.</p>;
+  }
+
+  return (
+    <div className="feedback-box">
+      <strong>Image scan</strong>
+      <StatusBadge value={job.imageScanStatus} />
+      {job.imageScanSummary && <p>{job.imageScanSummary}</p>}
+      {job.imageScanReport && (
+        <details>
+          <summary>Технический report</summary>
+          <pre>{job.imageScanReport}</pre>
+        </details>
       )}
     </div>
   );
@@ -1110,6 +1134,7 @@ function StudentDashboard({
             <>
               <strong>{job.imageReference}</strong>
               <StatusBadge value={job.status} />
+              <ImageScanSummary job={job} />
               {job.errorMessage && <p className="error-text">{job.errorMessage}</p>}
             </>
           )}
@@ -1241,6 +1266,7 @@ function CuratorDashboard({
             <>
               <strong>{job.imageReference}</strong>
               <StatusBadge value={job.status} />
+              <ImageScanSummary job={job} />
               <div className="actions">
                 <button type="button" onClick={() => void onCompleteValidation(job.id, true)}>
                   Отметить как пройдено
@@ -1369,6 +1395,7 @@ function ReviewForm({
         <div className="feedback-box">
           <strong>Technical validation</strong>
           <StatusBadge value={validationJob.status} />
+          <ImageScanSummary job={validationJob} />
           {validationJob.logsUri && <p className="muted">Logs: {validationJob.logsUri}</p>}
           {validationJob.errorMessage && <p className="error-text">{validationJob.errorMessage}</p>}
         </div>

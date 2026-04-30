@@ -47,6 +47,11 @@ Admin dashboard показывает количество approved submissions, 
 - Student dashboard показывает progress bars по урокам, отчетам с feedback, black box целям и статусам submissions/reports.
 - Admin dashboard показывает progress bars по technical validation, approved reports, созданным labs и статусам validation jobs/labs.
 
+## Image Scanning
+
+- Student и Curator dashboards показывают baseline image scan status, summary и technical report внутри validation job.
+- Scan warnings не блокируют technical validation, но помогают обсудить container hardening.
+
 ## Route guards
 
 - Anonymous user доступен только к `/login`.
