@@ -82,6 +82,13 @@ Response:
 
 Назначение: получить progress студента по урокам модуля.
 
+### `GET /api/modules/{moduleId}/result`
+
+Роль: студент.
+
+Назначение: получить итог модуля по формуле `WhiteBox * 0.45 + BlackBox * 0.55`, если Docker-допуск
+пройден и оба отчета проверены куратором.
+
 ### `POST /api/lessons/{lessonId}/complete`
 
 Роль: студент.

@@ -9,4 +9,6 @@ import ru.pep.platform.domain.Submission;
 public interface SubmissionRepository extends JpaRepository<Submission, UUID> {
 
     List<Submission> findByStudent(AppUser student);
+
+    List<Submission> findByStudentAndModuleId(AppUser student, UUID moduleId);
 }

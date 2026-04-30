@@ -1,6 +1,7 @@
 package ru.pep.platform.api;
 
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -161,6 +162,14 @@ class CorePlatformControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
 
+        mockMvc.perform(get("/api/modules/{moduleId}/result", moduleId)
+                        .with(httpBasic("student1@pep.local", "student")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dockerPassed").value(true))
+                .andExpect(jsonPath("$.whiteBoxScore").value(90))
+                .andExpect(jsonPath("$.blackBoxScore").value(nullValue()))
+                .andExpect(jsonPath("$.status").value("IN_PROGRESS"));
+
         MvcResult labResult = mockMvc.perform(post("/api/labs")
                         .with(httpBasic("admin@pep.local", "admin"))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -189,7 +198,7 @@ class CorePlatformControllerTest {
 
         String assignmentId = objectMapper.readTree(assignmentResult.getResponse().getContentAsString()).get(0).get("id").asText();
 
-        mockMvc.perform(post("/api/reports")
+        MvcResult blackBoxReportResult = mockMvc.perform(post("/api/reports")
                         .with(httpBasic("student2@pep.local", "student"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -203,7 +212,33 @@ class CorePlatformControllerTest {
                                 """.formatted(moduleId, assignmentId)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.blackBoxAssignmentId").value(assignmentId))
-                .andExpect(jsonPath("$.status").value("SUBMITTED"));
+                .andExpect(jsonPath("$.status").value("SUBMITTED"))
+                .andReturn();
+
+        String blackBoxReportId = objectMapper.readTree(blackBoxReportResult.getResponse().getContentAsString()).get("id").asText();
+
+        mockMvc.perform(post("/api/reviews")
+                        .with(httpBasic("curator@pep.local", "curator"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reportId": "%s",
+                                  "decision": "APPROVED",
+                                  "score": 80,
+                                  "commentMarkdown": "Black box finding воспроизводится."
+                                }
+                                """.formatted(blackBoxReportId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.decision").value("APPROVED"));
+
+        mockMvc.perform(get("/api/modules/{moduleId}/result", moduleId)
+                        .with(httpBasic("student2@pep.local", "student")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dockerPassed").value(false))
+                .andExpect(jsonPath("$.whiteBoxScore").value(nullValue()))
+                .andExpect(jsonPath("$.blackBoxScore").value(80))
+                .andExpect(jsonPath("$.finalScore").value(nullValue()))
+                .andExpect(jsonPath("$.status").value("DOCKER_REQUIRED"));
 
         mockMvc.perform(get("/api/audit")
                         .with(httpBasic("admin@pep.local", "admin")))

@@ -52,6 +52,12 @@ public class CorePlatformController {
         return platform.completeLesson(principal.getName(), lessonId);
     }
 
+    @GetMapping("/modules/{moduleId}/result")
+    @PreAuthorize("hasRole('STUDENT')")
+    public CoreDtos.ModuleResultResponse getModuleResult(Principal principal, @PathVariable UUID moduleId) {
+        return platform.getModuleResult(principal.getName(), moduleId);
+    }
+
     @PostMapping("/submissions")
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('STUDENT')")

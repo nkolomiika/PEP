@@ -269,6 +269,10 @@ pre {
   padding: 16px;
 }
 
+.module-result {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
 .metrics dt {
   color: #64748b;
   font-weight: 700;

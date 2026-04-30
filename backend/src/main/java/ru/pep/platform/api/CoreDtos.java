@@ -108,6 +108,15 @@ public final class CoreDtos {
             String commentMarkdown) {
     }
 
+    public record ModuleResultResponse(
+            UUID moduleId,
+            boolean dockerPassed,
+            Integer whiteBoxScore,
+            Integer blackBoxScore,
+            Integer finalScore,
+            String status) {
+    }
+
     public record AuditEventResponse(
             UUID id,
             String actorEmail,

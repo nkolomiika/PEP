@@ -93,6 +93,15 @@ type Review = {
   commentMarkdown: string;
 };
 
+type ModuleResult = {
+  moduleId: string;
+  dockerPassed: boolean;
+  whiteBoxScore?: number | null;
+  blackBoxScore?: number | null;
+  finalScore?: number | null;
+  status: string;
+};
+
 type AuditEvent = {
   id: string;
   actorEmail?: string;
@@ -135,6 +144,7 @@ type ApiState = {
   lessons: LessonSummary[];
   selectedLesson?: Lesson;
   lessonProgress: LessonProgress[];
+  moduleResult?: ModuleResult;
   selectedModuleId?: string;
   labs: Lab[];
   assignments: BlackBoxAssignment[];
@@ -166,6 +176,7 @@ const statusLabels: Record<string, string> = {
   ASSIGNED: "Назначено",
   IN_PROGRESS: "В работе",
   COMPLETED: "Изучено",
+  DOCKER_REQUIRED: "Нужен Docker-допуск",
   SCORED: "Оценено"
 };
 
@@ -216,6 +227,7 @@ function App() {
     lessons: [],
     selectedLesson: undefined,
     lessonProgress: [],
+    moduleResult: undefined,
     selectedModuleId: undefined,
     labs: [],
     assignments: [],
@@ -268,6 +280,10 @@ function App() {
         activeAccount.role === "STUDENT" && nextSelectedModule
           ? await apiRequest<LessonProgress[]>(activeAccount, `/api/modules/${nextSelectedModule.id}/lesson-progress`)
           : [];
+      const moduleResult =
+        activeAccount.role === "STUDENT" && nextSelectedModule
+          ? await apiRequest<ModuleResult>(activeAccount, `/api/modules/${nextSelectedModule.id}/result`)
+          : undefined;
       const labs =
         activeAccount.role === "ADMIN" || activeAccount.role === "CURATOR"
           ? await apiRequest<Lab[]>(activeAccount, "/api/labs")
@@ -287,6 +303,7 @@ function App() {
         lessons,
         selectedLesson,
         lessonProgress,
+        moduleResult,
         selectedModuleId: nextSelectedModule?.id,
         labs,
         assignments,
@@ -342,11 +359,14 @@ function App() {
         account.role === "STUDENT"
           ? await apiRequest<LessonProgress[]>(account, `/api/modules/${moduleId}/lesson-progress`)
           : [];
+      const moduleResult =
+        account.role === "STUDENT" ? await apiRequest<ModuleResult>(account, `/api/modules/${moduleId}/result`) : undefined;
       setState((current) => ({
         ...current,
         lessons,
         selectedLesson,
         lessonProgress,
+        moduleResult,
         selectedModuleId: moduleId
       }));
       setMessage("Учебный модуль открыт.");
@@ -409,6 +429,7 @@ function App() {
           lessons={state.lessons}
           selectedLesson={state.selectedLesson}
           lessonProgress={state.lessonProgress}
+          moduleResult={state.moduleResult}
           submissions={state.submissions}
           validationJobs={state.validationJobs}
           reports={state.reports}
@@ -557,6 +578,7 @@ function StudentDashboard({
   lessons,
   selectedLesson,
   lessonProgress,
+  moduleResult,
   submissions,
   validationJobs,
   reports,
@@ -573,6 +595,7 @@ function StudentDashboard({
   lessons: LessonSummary[];
   selectedLesson?: Lesson;
   lessonProgress: LessonProgress[];
+  moduleResult?: ModuleResult;
   submissions: Submission[];
   validationJobs: ValidationJob[];
   reports: Report[];
@@ -670,6 +693,38 @@ function StudentDashboard({
               </div>
             </div>
           </>
+        )}
+      </article>
+
+      <article className="card wide">
+        <h2>Итог модуля</h2>
+        {!moduleResult ? (
+          <EmptyState>Итог появится после выбора учебного модуля.</EmptyState>
+        ) : (
+          <div className="metrics module-result">
+            <div>
+              <dt>Docker-допуск</dt>
+              <dd>{moduleResult.dockerPassed ? "Да" : "Нет"}</dd>
+            </div>
+            <div>
+              <dt>White box</dt>
+              <dd>{moduleResult.whiteBoxScore ?? "-"}</dd>
+            </div>
+            <div>
+              <dt>Black box</dt>
+              <dd>{moduleResult.blackBoxScore ?? "-"}</dd>
+            </div>
+            <div>
+              <dt>Итог</dt>
+              <dd>{moduleResult.finalScore ?? "-"}</dd>
+            </div>
+            <div>
+              <dt>Статус</dt>
+              <dd>
+                <StatusBadge value={moduleResult.status} />
+              </dd>
+            </div>
+          </div>
         )}
       </article>
 

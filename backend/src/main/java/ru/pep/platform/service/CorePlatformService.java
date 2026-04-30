@@ -14,7 +14,9 @@ import ru.pep.platform.domain.Lesson;
 import ru.pep.platform.domain.LessonProgress;
 import ru.pep.platform.domain.Report;
 import ru.pep.platform.domain.Review;
+import ru.pep.platform.domain.ReportType;
 import ru.pep.platform.domain.Role;
+import ru.pep.platform.domain.ReviewDecision;
 import ru.pep.platform.domain.Submission;
 import ru.pep.platform.domain.SubmissionStatus;
 import ru.pep.platform.domain.ValidationJob;
@@ -251,6 +253,36 @@ public class CorePlatformService {
         return result.stream().map(this::toReviewResponse).toList();
     }
 
+    @Transactional(readOnly = true)
+    public CoreDtos.ModuleResultResponse getModuleResult(String email, UUID moduleId) {
+        AppUser student = currentUser(email);
+        if (student.getRole() != Role.STUDENT) {
+            throw new AccessDeniedException("Итог модуля доступен только студенту");
+        }
+        if (!modules.existsById(moduleId)) {
+            throw new NotFoundException("Модуль не найден");
+        }
+        boolean dockerPassed = submissions.findByStudentAndModuleId(student, moduleId).stream()
+                .anyMatch(submission -> submission.getStatus() == SubmissionStatus.READY_FOR_REVIEW
+                        || submission.getStatus() == SubmissionStatus.APPROVED
+                        || submission.getStatus() == SubmissionStatus.PUBLISHED_FOR_BLACK_BOX);
+        List<Review> moduleReviews = reviews.findByReportAuthorAndReportModuleId(student, moduleId);
+        Integer whiteBoxScore = bestScore(moduleReviews, ReportType.WHITE_BOX);
+        Integer blackBoxScore = bestScore(moduleReviews, ReportType.BLACK_BOX);
+        Integer finalScore = dockerPassed && whiteBoxScore != null && blackBoxScore != null
+                ? Math.round((float) (whiteBoxScore * 0.45 + blackBoxScore * 0.55))
+                : null;
+        String status;
+        if (!dockerPassed) {
+            status = "DOCKER_REQUIRED";
+        } else if (whiteBoxScore == null || blackBoxScore == null) {
+            status = "IN_PROGRESS";
+        } else {
+            status = "COMPLETED";
+        }
+        return new CoreDtos.ModuleResultResponse(moduleId, dockerPassed, whiteBoxScore, blackBoxScore, finalScore, status);
+    }
+
     @Transactional
     public CoreDtos.LabResponse createLab(String email, CoreDtos.CreateLabRequest request) {
         AppUser actor = currentUser(email);
@@ -341,6 +373,15 @@ public class CorePlatformService {
 
     private String shortId(UUID id) {
         return id.toString().substring(0, 8);
+    }
+
+    private Integer bestScore(List<Review> moduleReviews, ReportType reportType) {
+        return moduleReviews.stream()
+                .filter(review -> review.getReport().getType() == reportType)
+                .filter(review -> review.getDecision() == ReviewDecision.APPROVED)
+                .map(Review::getScore)
+                .max(Integer::compareTo)
+                .orElse(null);
     }
 
     private CoreDtos.CourseResponse toCourseResponse(Course course) {
