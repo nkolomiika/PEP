@@ -35,6 +35,8 @@ import ru.pep.platform.repository.ValidationJobRepository;
 @Service
 public class CorePlatformService {
 
+    private static final int MAX_BLACK_BOX_TARGETS_PER_STUDENT = 3;
+
     private final AppUserRepository users;
     private final CourseRepository courses;
     private final LearningModuleRepository modules;
@@ -318,6 +320,10 @@ public class CorePlatformService {
                 .toList();
         int created = 0;
         for (AppUser student : students) {
+            long assignedTargets = assignments.countByModuleAndStudent(module, student);
+            if (assignedTargets >= MAX_BLACK_BOX_TARGETS_PER_STUDENT) {
+                continue;
+            }
             for (LabInstance lab : moduleLabs) {
                 if (lab.getSubmission().getStudent().getId().equals(student.getId())) {
                     continue;
@@ -327,7 +333,10 @@ public class CorePlatformService {
                 }
                 assignments.save(new BlackBoxAssignment(module, student, lab));
                 created++;
-                break;
+                assignedTargets++;
+                if (assignedTargets >= MAX_BLACK_BOX_TARGETS_PER_STUDENT) {
+                    break;
+                }
             }
         }
         audit.record(actor, "BLACK_BOX_DISTRIBUTION_COMPLETED", "Module", moduleId, "{\"createdAssignments\":" + created + "}");

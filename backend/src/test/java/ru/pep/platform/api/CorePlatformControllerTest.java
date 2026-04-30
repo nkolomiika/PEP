@@ -189,6 +189,11 @@ class CorePlatformControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.createdAssignments").value(1));
 
+        mockMvc.perform(post("/api/modules/{moduleId}/black-box-assignments/distribute", moduleId)
+                        .with(httpBasic("admin@pep.local", "admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.createdAssignments").value(0));
+
         MvcResult assignmentResult = mockMvc.perform(get("/api/black-box-assignments/my")
                         .with(httpBasic("student2@pep.local", "student")))
                 .andExpect(status().isOk())

@@ -13,4 +13,6 @@ public interface BlackBoxAssignmentRepository extends JpaRepository<BlackBoxAssi
     List<BlackBoxAssignment> findByStudent(AppUser student);
 
     boolean existsByModuleAndStudentAndTargetLabInstance(LearningModule module, AppUser student, LabInstance targetLabInstance);
+
+    long countByModuleAndStudent(LearningModule module, AppUser student);
 }
