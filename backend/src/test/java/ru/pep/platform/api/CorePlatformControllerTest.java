@@ -32,11 +32,11 @@ class CorePlatformControllerTest {
         MvcResult coursesResult = mockMvc.perform(get("/api/courses")
                         .with(httpBasic("student1@pep.local", "student")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$", hasSize(2)))
                 .andReturn();
 
         JsonNode courses = objectMapper.readTree(coursesResult.getResponse().getContentAsString());
-        String moduleId = courses.get(0).get("modules").get(0).get("id").asText();
+        String moduleId = findModuleId(courses, "A03. Injection");
 
         MvcResult lessonsResult = mockMvc.perform(get("/api/modules/{moduleId}/lessons", moduleId)
                         .with(httpBasic("student1@pep.local", "student")))
@@ -195,5 +195,16 @@ class CorePlatformControllerTest {
         mockMvc.perform(get("/api/audit")
                         .with(httpBasic("admin@pep.local", "admin")))
                 .andExpect(status().isOk());
+    }
+
+    private String findModuleId(JsonNode courses, String moduleTitle) {
+        for (JsonNode course : courses) {
+            for (JsonNode module : course.get("modules")) {
+                if (moduleTitle.equals(module.get("title").asText())) {
+                    return module.get("id").asText();
+                }
+            }
+        }
+        throw new AssertionError("Module not found: " + moduleTitle);
     }
 }

@@ -55,6 +55,11 @@ public class LearningModule {
         this.status = status;
     }
 
+    public LearningModule(Course course, String title, String vulnerabilityTopic, ModuleStatus status) {
+        this(title, vulnerabilityTopic, status);
+        this.course = course;
+    }
+
     @PrePersist
     void onCreate() {
         if (id == null) {

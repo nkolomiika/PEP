@@ -13,6 +13,7 @@ import ru.pep.platform.domain.ModuleStatus;
 import ru.pep.platform.domain.Role;
 import ru.pep.platform.repository.AppUserRepository;
 import ru.pep.platform.repository.CourseRepository;
+import ru.pep.platform.repository.LearningModuleRepository;
 import ru.pep.platform.repository.LessonRepository;
 
 @Configuration
@@ -22,6 +23,7 @@ public class DemoDataInitializer {
     CommandLineRunner seedDemoData(
             AppUserRepository users,
             CourseRepository courses,
+            LearningModuleRepository modules,
             LessonRepository lessons,
             PasswordEncoder passwordEncoder) {
         return args -> {
@@ -30,20 +32,117 @@ public class DemoDataInitializer {
             createUser(users, passwordEncoder, "student1@pep.local", "student", "Студент 1", Role.STUDENT);
             createUser(users, passwordEncoder, "student2@pep.local", "student", "Студент 2", Role.STUDENT);
 
-            if (courses.count() == 0) {
-                Course course = new Course(
-                        "OWASP Top 10",
-                        "Практический курс по базовым классам web-уязвимостей.",
-                        CourseStatus.PUBLISHED);
-                LearningModule module = new LearningModule("A03. Injection", "SQL Injection", ModuleStatus.ACTIVE);
-                course.addModule(module);
-                courses.save(course);
-                seedLessons(lessons, module);
-            }
+            LearningModule dockerModule = ensureModule(
+                    courses,
+                    modules,
+                    "Вводный курс по Docker",
+                    "Базовый курс по контейнерам, Dockerfile, Docker Compose и публикации image.",
+                    "Docker intro",
+                    "Docker basics");
+            seedDockerLessons(lessons, dockerModule);
+
+            LearningModule injectionModule = ensureModule(
+                    courses,
+                    modules,
+                    "OWASP Top 10",
+                    "Практический курс по базовым классам web-уязвимостей.",
+                    "A03. Injection",
+                    "SQL Injection");
+            seedInjectionLessons(lessons, injectionModule);
         };
     }
 
-    private void seedLessons(LessonRepository lessons, LearningModule module) {
+    private LearningModule ensureModule(
+            CourseRepository courses,
+            LearningModuleRepository modules,
+            String courseTitle,
+            String courseDescription,
+            String moduleTitle,
+            String vulnerabilityTopic) {
+        Course course = courses.findByTitle(courseTitle)
+                .orElseGet(() -> courses.save(new Course(courseTitle, courseDescription, CourseStatus.PUBLISHED)));
+        return modules.findByCourseIdAndTitle(course.getId(), moduleTitle)
+                .orElseGet(() -> modules.save(new LearningModule(course, moduleTitle, vulnerabilityTopic, ModuleStatus.ACTIVE)));
+    }
+
+    private void seedDockerLessons(LessonRepository lessons, LearningModule module) {
+        if (lessons.existsByModuleId(module.getId())) {
+            return;
+        }
+        lessons.save(new Lesson(
+                module,
+                "Контейнеры и образы",
+                """
+                        ## Цель урока
+
+                        Понять, зачем нужна контейнеризация и чем Docker image отличается от running container.
+
+                        ## Ключевые идеи
+
+                        - image - неизменяемый шаблон приложения;
+                        - container - запущенный процесс на основе image;
+                        - registry хранит и раздает images;
+                        - logs помогают диагностировать запуск приложения.
+
+                        ## Практика
+
+                        ```bash
+                        docker run hello-world
+                        docker run --rm -p 8081:80 nginx:alpine
+                        docker logs <container-id>
+                        ```
+                        """,
+                1));
+        lessons.save(new Lesson(
+                module,
+                "Основы Dockerfile",
+                """
+                        ## Цель урока
+
+                        Научиться описывать приложение как Docker image с воспроизводимым запуском.
+
+                        ## Минимальный Dockerfile
+
+                        ```dockerfile
+                        FROM node:22-alpine
+                        WORKDIR /app
+                        COPY app.js .
+                        EXPOSE 8080
+                        CMD ["node", "app.js"]
+                        ```
+
+                        ## Checklist
+
+                        - есть понятный `FROM`;
+                        - приложение слушает документированный port;
+                        - запуск происходит одной командой `docker run`.
+                        """,
+                2));
+        lessons.save(new Lesson(
+                module,
+                "Публикация image в registry",
+                """
+                        ## Цель урока
+
+                        Подготовить image reference, который можно отправить на платформу.
+
+                        ## Команды для demo registry
+
+                        ```bash
+                        docker build -t vulnerable-sqli-demo:latest ./examples/vulnerable-sqli-demo
+                        docker tag vulnerable-sqli-demo:latest localhost:5001/vulnerable-sqli-demo:latest
+                        docker push localhost:5001/vulnerable-sqli-demo:latest
+                        ```
+
+                        ## Важно
+
+                        В MVP платформа не собирает исходный код студента. Студент отправляет только готовый
+                        Docker image reference, application port и health path.
+                        """,
+                3));
+    }
+
+    private void seedInjectionLessons(LessonRepository lessons, LearningModule module) {
         if (lessons.existsByModuleId(module.getId())) {
             return;
         }

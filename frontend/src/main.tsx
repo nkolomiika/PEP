@@ -28,6 +28,10 @@ type LearningModule = {
   status: string;
 };
 
+type ModuleOption = LearningModule & {
+  courseTitle: string;
+};
+
 type LessonSummary = {
   id: string;
   moduleId: string;
@@ -121,6 +125,7 @@ type ApiState = {
   lessons: LessonSummary[];
   selectedLesson?: Lesson;
   lessonProgress: LessonProgress[];
+  selectedModuleId?: string;
   labs: Lab[];
   assignments: BlackBoxAssignment[];
   auditEvents: AuditEvent[];
@@ -200,6 +205,7 @@ function App() {
     lessons: [],
     selectedLesson: undefined,
     lessonProgress: [],
+    selectedModuleId: undefined,
     labs: [],
     assignments: [],
     auditEvents: []
@@ -208,7 +214,24 @@ function App() {
   const [message, setMessage] = useState("Выберите demo-пользователя и загрузите данные.");
   const [error, setError] = useState<string | null>(null);
 
-  const firstModule = useMemo(() => state.courses[0]?.modules[0], [state.courses]);
+  const moduleOptions = useMemo(
+    () =>
+      state.courses.flatMap((course) =>
+        course.modules.map((module) => ({
+          ...module,
+          courseTitle: course.title
+        }))
+      ),
+    [state.courses]
+  );
+  const selectedModule = useMemo(
+    () => moduleOptions.find((module) => module.id === state.selectedModuleId) ?? moduleOptions[0],
+    [moduleOptions, state.selectedModuleId]
+  );
+  const labModule = useMemo(
+    () => moduleOptions.find((module) => module.title === "A03. Injection") ?? selectedModule,
+    [moduleOptions, selectedModule]
+  );
 
   async function loadDashboard(activeAccount = account) {
     setLoading(true);
@@ -220,16 +243,18 @@ function App() {
         apiRequest<ValidationJob[]>(activeAccount, "/api/validation-jobs"),
         apiRequest<Report[]>(activeAccount, "/api/reports")
       ]);
-      const firstLoadedModule = courses[0]?.modules[0];
-      const lessons = firstLoadedModule
-        ? await apiRequest<LessonSummary[]>(activeAccount, `/api/modules/${firstLoadedModule.id}/lessons`)
+      const loadedModules = courses.flatMap((course) => course.modules);
+      const nextSelectedModule =
+        loadedModules.find((module) => module.id === state.selectedModuleId) ?? loadedModules[0];
+      const lessons = nextSelectedModule
+        ? await apiRequest<LessonSummary[]>(activeAccount, `/api/modules/${nextSelectedModule.id}/lessons`)
         : [];
       const selectedLesson = lessons[0]
         ? await apiRequest<Lesson>(activeAccount, `/api/lessons/${lessons[0].id}`)
         : undefined;
       const lessonProgress =
-        activeAccount.role === "STUDENT" && firstLoadedModule
-          ? await apiRequest<LessonProgress[]>(activeAccount, `/api/modules/${firstLoadedModule.id}/lesson-progress`)
+        activeAccount.role === "STUDENT" && nextSelectedModule
+          ? await apiRequest<LessonProgress[]>(activeAccount, `/api/modules/${nextSelectedModule.id}/lesson-progress`)
           : [];
       const labs =
         activeAccount.role === "ADMIN" || activeAccount.role === "CURATOR"
@@ -249,6 +274,7 @@ function App() {
         lessons,
         selectedLesson,
         lessonProgress,
+        selectedModuleId: nextSelectedModule?.id,
         labs,
         assignments,
         auditEvents
@@ -288,6 +314,31 @@ function App() {
       setMessage("Урок открыт.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось открыть урок.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function selectModule(moduleId: string) {
+    setLoading(true);
+    setError(null);
+    try {
+      const lessons = await apiRequest<LessonSummary[]>(account, `/api/modules/${moduleId}/lessons`);
+      const selectedLesson = lessons[0] ? await apiRequest<Lesson>(account, `/api/lessons/${lessons[0].id}`) : undefined;
+      const lessonProgress =
+        account.role === "STUDENT"
+          ? await apiRequest<LessonProgress[]>(account, `/api/modules/${moduleId}/lesson-progress`)
+          : [];
+      setState((current) => ({
+        ...current,
+        lessons,
+        selectedLesson,
+        lessonProgress,
+        selectedModuleId: moduleId
+      }));
+      setMessage("Учебный модуль открыт.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось открыть модуль.");
     } finally {
       setLoading(false);
     }
@@ -340,7 +391,8 @@ function App() {
 
       {account.role === "STUDENT" && (
         <StudentDashboard
-          firstModule={firstModule}
+          moduleOptions={moduleOptions}
+          selectedModule={selectedModule}
           lessons={state.lessons}
           selectedLesson={state.selectedLesson}
           lessonProgress={state.lessonProgress}
@@ -348,6 +400,7 @@ function App() {
           validationJobs={state.validationJobs}
           reports={state.reports}
           assignments={state.assignments}
+          onSelectModule={selectModule}
           onCreateSubmission={(payload) =>
             withRefresh(
               () =>
@@ -419,7 +472,7 @@ function App() {
           reports={state.reports}
           labs={state.labs}
           auditEvents={state.auditEvents}
-          firstModule={firstModule}
+          firstModule={labModule}
           onCreateLab={(submissionId) =>
             withRefresh(
               () =>
@@ -485,7 +538,8 @@ function UserCard({ account }: { account: DemoAccount }) {
 }
 
 function StudentDashboard({
-  firstModule,
+  moduleOptions,
+  selectedModule,
   lessons,
   selectedLesson,
   lessonProgress,
@@ -493,12 +547,14 @@ function StudentDashboard({
   validationJobs,
   reports,
   assignments,
+  onSelectModule,
   onCreateSubmission,
   onSelectLesson,
   onCompleteLesson,
   onCreateReport
 }: {
-  firstModule?: LearningModule;
+  moduleOptions: ModuleOption[];
+  selectedModule?: ModuleOption;
   lessons: LessonSummary[];
   selectedLesson?: Lesson;
   lessonProgress: LessonProgress[];
@@ -506,6 +562,7 @@ function StudentDashboard({
   validationJobs: ValidationJob[];
   reports: Report[];
   assignments: BlackBoxAssignment[];
+  onSelectModule: (moduleId: string) => Promise<void>;
   onCreateSubmission: (payload: {
     moduleId: string;
     imageReference: string;
@@ -528,7 +585,7 @@ function StudentDashboard({
   const [blackBoxReportText, setBlackBoxReportText] = useState(
     "Target: назначенный lab\nPayload: ' OR '1'='1\nEvidence: результат поиска раскрывает лишние данные."
   );
-  const latestSubmission = submissions[0];
+  const latestSubmission = submissions.find((submission) => submission.moduleId === selectedModule?.id);
   const completedLessonIds = useMemo(
     () => new Set(lessonProgress.filter((item) => item.completed).map((item) => item.lessonId)),
     [lessonProgress]
@@ -539,12 +596,24 @@ function StudentDashboard({
     <section className="grid">
       <article className="card wide">
         <h2>Учебные материалы модуля</h2>
-        {!firstModule ? (
+        {!selectedModule ? (
           <EmptyState>Нет активного модуля.</EmptyState>
         ) : (
           <>
+            <label htmlFor="moduleSelect">Курс и модуль</label>
+            <select
+              id="moduleSelect"
+              value={selectedModule.id}
+              onChange={(event) => void onSelectModule(event.target.value)}
+            >
+              {moduleOptions.map((module) => (
+                <option key={module.id} value={module.id}>
+                  {module.courseTitle}: {module.title}
+                </option>
+              ))}
+            </select>
             <p className="muted">
-              {firstModule.title}: {firstModule.vulnerabilityTopic}
+              {selectedModule.courseTitle}: {selectedModule.title} ({selectedModule.vulnerabilityTopic})
             </p>
             <p className="progress-line">
               Изучено: {completedLessonIds.size} из {lessons.length}
@@ -586,7 +655,7 @@ function StudentDashboard({
 
       <article className="card">
         <h2>Student: сдача Docker image</h2>
-        {!firstModule ? (
+        {!selectedModule ? (
           <EmptyState>Нет активного модуля.</EmptyState>
         ) : (
           <form
@@ -594,7 +663,7 @@ function StudentDashboard({
             onSubmit={(event) => {
               event.preventDefault();
               void onCreateSubmission({
-                moduleId: firstModule.id,
+                moduleId: selectedModule.id,
                 imageReference,
                 applicationPort: 8080,
                 healthPath: "/health"
@@ -625,7 +694,7 @@ function StudentDashboard({
 
       <article className="card">
         <h2>Student: white box отчет</h2>
-        {!firstModule || !latestSubmission ? (
+        {!selectedModule || !latestSubmission ? (
           <EmptyState>Сначала отправьте Docker image.</EmptyState>
         ) : (
           <form
@@ -633,7 +702,7 @@ function StudentDashboard({
             onSubmit={(event) => {
               event.preventDefault();
               void onCreateReport({
-                moduleId: firstModule.id,
+                moduleId: selectedModule.id,
                 submissionId: latestSubmission.id,
                 type: "WHITE_BOX",
                 title: "White box отчет по SQL Injection",
@@ -680,13 +749,13 @@ function StudentDashboard({
               <strong>{assignment.targetUrl}</strong>
               <StatusBadge value={assignment.status} />
               <p className="muted">Image target: {assignment.targetImageReference}</p>
-              {firstModule && assignment.status !== "SUBMITTED" && (
+              {selectedModule && assignment.status !== "SUBMITTED" && (
                 <form
                   className="form nested-form"
                   onSubmit={(event) => {
                     event.preventDefault();
                     void onCreateReport({
-                      moduleId: firstModule.id,
+                      moduleId: assignment.moduleId,
                       blackBoxAssignmentId: assignment.id,
                       type: "BLACK_BOX",
                       title: "Black box отчет по SQL Injection",
