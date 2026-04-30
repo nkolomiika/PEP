@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pep-platform
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pep-backend
+  namespace: pep-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pep-backend
+  template:
+    metadata:
+      labels:
+        app: pep-backend
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: backend
+          image: pep-backend:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PEP_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: pep-database
+                  key: url
+            - name: PEP_DATABASE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: pep-database
+                  key: username
+            - name: PEP_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pep-database
+                  key: password
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pep-backend
+  namespace: pep-platform
+spec:
+  selector:
+    app: pep-backend
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pep-frontend
+  namespace: pep-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pep-frontend
+  template:
+    metadata:
+      labels:
+        app: pep-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: pep-frontend:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pep-frontend
+  namespace: pep-platform
+spec:
+  selector:
+    app: pep-frontend
+  ports:
+    - port: 80
+      targetPort: 80

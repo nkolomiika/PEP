@@ -1,0 +1,23 @@
+{
+  "name": "pep-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "typescript": "latest",
+    "vite": "latest"
+  },
+  "optionalDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "file:rolldown-binding-win32-x64-msvc-1.0.0-rc.17.tgz"
+  }
+}
