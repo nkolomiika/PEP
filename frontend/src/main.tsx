@@ -473,6 +473,7 @@ function App() {
 
       {account.role === "CURATOR" && (
         <CuratorDashboard
+          submissions={state.submissions}
           validationJobs={state.validationJobs}
           reports={state.reports}
           onCompleteValidation={(jobId, passed) =>
@@ -871,11 +872,13 @@ function StudentDashboard({
 }
 
 function CuratorDashboard({
+  submissions,
   validationJobs,
   reports,
   onCompleteValidation,
   onCreateReview
 }: {
+  submissions: Submission[];
   validationJobs: ValidationJob[];
   reports: Report[];
   onCompleteValidation: (jobId: string, passed: boolean) => Promise<void>;
@@ -916,7 +919,13 @@ function CuratorDashboard({
           title="Очередь отчетов"
           items={reports}
           render={(report) => (
-            <ReviewForm key={report.id} report={report} onCreateReview={onCreateReview} />
+            <ReviewForm
+              key={report.id}
+              report={report}
+              submissions={submissions}
+              validationJobs={validationJobs}
+              onCreateReview={onCreateReview}
+            />
           )}
         />
       </article>
@@ -926,9 +935,13 @@ function CuratorDashboard({
 
 function ReviewForm({
   report,
+  submissions,
+  validationJobs,
   onCreateReview
 }: {
   report: Report;
+  submissions: Submission[];
+  validationJobs: ValidationJob[];
   onCreateReview: (payload: {
     reportId: string;
     decision: ReviewDecision;
@@ -939,6 +952,8 @@ function ReviewForm({
   const [score, setScore] = useState(90);
   const [decision, setDecision] = useState<ReviewDecision>("APPROVED");
   const [comment, setComment] = useState("Уязвимость воспроизводится, evidence достаточно.");
+  const submission = submissions.find((item) => item.id === report.submissionId);
+  const validationJob = validationJobs.find((job) => job.submissionId === report.submissionId);
 
   return (
     <form
@@ -951,6 +966,28 @@ function ReviewForm({
       <strong>{report.title}</strong>
       <StatusBadge value={report.status} />
       <p className="muted">{report.authorEmail}</p>
+      <p className="muted">
+        Тип: {report.type === "WHITE_BOX" ? "White box" : "Black box"}
+        {report.blackBoxAssignmentId ? `, assignment: ${report.blackBoxAssignmentId}` : ""}
+      </p>
+      {submission && (
+        <div className="feedback-box">
+          <strong>Submission context</strong>
+          <p>{submission.imageReference}</p>
+          <StatusBadge value={submission.status} />
+          <p className="muted">
+            Port: {submission.applicationPort}, health: {submission.healthPath}
+          </p>
+        </div>
+      )}
+      {validationJob && (
+        <div className="feedback-box">
+          <strong>Technical validation</strong>
+          <StatusBadge value={validationJob.status} />
+          {validationJob.logsUri && <p className="muted">Logs: {validationJob.logsUri}</p>}
+          {validationJob.errorMessage && <p className="error-text">{validationJob.errorMessage}</p>}
+        </div>
+      )}
       <pre>{report.contentMarkdown}</pre>
       <label htmlFor={`decision-${report.id}`}>Решение</label>
       <select id={`decision-${report.id}`} value={decision} onChange={(event) => setDecision(event.target.value as ReviewDecision)}>
