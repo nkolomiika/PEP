@@ -30,6 +30,16 @@ public class CorePlatformController {
         return platform.listCourses();
     }
 
+    @GetMapping("/modules/{moduleId}/lessons")
+    public List<CoreDtos.LessonSummaryResponse> listLessons(@PathVariable UUID moduleId) {
+        return platform.listLessons(moduleId);
+    }
+
+    @GetMapping("/lessons/{lessonId}")
+    public CoreDtos.LessonResponse getLesson(@PathVariable UUID lessonId) {
+        return platform.getLesson(lessonId);
+    }
+
     @PostMapping("/submissions")
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('STUDENT')")

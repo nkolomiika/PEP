@@ -10,6 +10,7 @@ import ru.pep.platform.domain.BlackBoxAssignment;
 import ru.pep.platform.domain.LabInstance;
 import ru.pep.platform.domain.Course;
 import ru.pep.platform.domain.LearningModule;
+import ru.pep.platform.domain.Lesson;
 import ru.pep.platform.domain.Report;
 import ru.pep.platform.domain.Review;
 import ru.pep.platform.domain.Role;
@@ -21,6 +22,7 @@ import ru.pep.platform.repository.BlackBoxAssignmentRepository;
 import ru.pep.platform.repository.CourseRepository;
 import ru.pep.platform.repository.LabInstanceRepository;
 import ru.pep.platform.repository.LearningModuleRepository;
+import ru.pep.platform.repository.LessonRepository;
 import ru.pep.platform.repository.ReportRepository;
 import ru.pep.platform.repository.ReviewRepository;
 import ru.pep.platform.repository.SubmissionRepository;
@@ -38,6 +40,7 @@ public class CorePlatformService {
     private final ReviewRepository reviews;
     private final LabInstanceRepository labs;
     private final BlackBoxAssignmentRepository assignments;
+    private final LessonRepository lessons;
     private final AuditService audit;
 
     public CorePlatformService(
@@ -50,6 +53,7 @@ public class CorePlatformService {
             ReviewRepository reviews,
             LabInstanceRepository labs,
             BlackBoxAssignmentRepository assignments,
+            LessonRepository lessons,
             AuditService audit) {
         this.users = users;
         this.courses = courses;
@@ -60,12 +64,40 @@ public class CorePlatformService {
         this.reviews = reviews;
         this.labs = labs;
         this.assignments = assignments;
+        this.lessons = lessons;
         this.audit = audit;
     }
 
     @Transactional(readOnly = true)
     public List<CoreDtos.CourseResponse> listCourses() {
         return courses.findAll().stream().map(this::toCourseResponse).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<CoreDtos.LessonSummaryResponse> listLessons(UUID moduleId) {
+        if (!modules.existsById(moduleId)) {
+            throw new NotFoundException("Модуль не найден");
+        }
+        return lessons.findByModuleIdAndPublishedTrueOrderByPositionAsc(moduleId).stream()
+                .map(lesson -> new CoreDtos.LessonSummaryResponse(
+                        lesson.getId(),
+                        lesson.getModule().getId(),
+                        lesson.getTitle(),
+                        lesson.getPosition()))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public CoreDtos.LessonResponse getLesson(UUID lessonId) {
+        Lesson lesson = lessons.findById(lessonId)
+                .filter(Lesson::getPublished)
+                .orElseThrow(() -> new NotFoundException("Урок не найден"));
+        return new CoreDtos.LessonResponse(
+                lesson.getId(),
+                lesson.getModule().getId(),
+                lesson.getTitle(),
+                lesson.getContentMarkdown(),
+                lesson.getPosition());
     }
 
     @Transactional

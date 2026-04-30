@@ -38,6 +38,19 @@ class CorePlatformControllerTest {
         JsonNode courses = objectMapper.readTree(coursesResult.getResponse().getContentAsString());
         String moduleId = courses.get(0).get("modules").get(0).get("id").asText();
 
+        MvcResult lessonsResult = mockMvc.perform(get("/api/modules/{moduleId}/lessons", moduleId)
+                        .with(httpBasic("student1@pep.local", "student")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(3)))
+                .andReturn();
+
+        String lessonId = objectMapper.readTree(lessonsResult.getResponse().getContentAsString()).get(0).get("id").asText();
+
+        mockMvc.perform(get("/api/lessons/{lessonId}", lessonId)
+                        .with(httpBasic("student1@pep.local", "student")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Docker image для сдачи на платформе"));
+
         MvcResult submissionResult = mockMvc.perform(post("/api/submissions")
                         .with(httpBasic("student1@pep.local", "student"))
                         .contentType(MediaType.APPLICATION_JSON)

@@ -33,6 +33,12 @@ public final class CoreDtos {
     public record ModuleResponse(UUID id, String title, String vulnerabilityTopic, ModuleStatus status) {
     }
 
+    public record LessonSummaryResponse(UUID id, UUID moduleId, String title, Integer position) {
+    }
+
+    public record LessonResponse(UUID id, UUID moduleId, String title, String contentMarkdown, Integer position) {
+    }
+
     public record CreateSubmissionRequest(
             @NotNull UUID moduleId,
             @NotBlank String imageReference,

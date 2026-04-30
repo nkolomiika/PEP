@@ -28,6 +28,21 @@ type LearningModule = {
   status: string;
 };
 
+type LessonSummary = {
+  id: string;
+  moduleId: string;
+  title: string;
+  position: number;
+};
+
+type Lesson = {
+  id: string;
+  moduleId: string;
+  title: string;
+  contentMarkdown: string;
+  position: number;
+};
+
 type Submission = {
   id: string;
   moduleId: string;
@@ -97,6 +112,8 @@ type ApiState = {
   submissions: Submission[];
   validationJobs: ValidationJob[];
   reports: Report[];
+  lessons: LessonSummary[];
+  selectedLesson?: Lesson;
   labs: Lab[];
   assignments: BlackBoxAssignment[];
   auditEvents: AuditEvent[];
@@ -172,6 +189,8 @@ function App() {
     submissions: [],
     validationJobs: [],
     reports: [],
+    lessons: [],
+    selectedLesson: undefined,
     labs: [],
     assignments: [],
     auditEvents: []
@@ -192,6 +211,13 @@ function App() {
         apiRequest<ValidationJob[]>(activeAccount, "/api/validation-jobs"),
         apiRequest<Report[]>(activeAccount, "/api/reports")
       ]);
+      const firstLoadedModule = courses[0]?.modules[0];
+      const lessons = firstLoadedModule
+        ? await apiRequest<LessonSummary[]>(activeAccount, `/api/modules/${firstLoadedModule.id}/lessons`)
+        : [];
+      const selectedLesson = lessons[0]
+        ? await apiRequest<Lesson>(activeAccount, `/api/lessons/${lessons[0].id}`)
+        : undefined;
       const labs =
         activeAccount.role === "ADMIN" || activeAccount.role === "CURATOR"
           ? await apiRequest<Lab[]>(activeAccount, "/api/labs")
@@ -202,7 +228,7 @@ function App() {
           : [];
       const auditEvents =
         activeAccount.role === "ADMIN" ? await apiRequest<AuditEvent[]>(activeAccount, "/api/audit") : [];
-      setState({ courses, submissions, validationJobs, reports, labs, assignments, auditEvents });
+      setState({ courses, submissions, validationJobs, reports, lessons, selectedLesson, labs, assignments, auditEvents });
       setMessage("Данные загружены.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось загрузить данные.");
@@ -224,6 +250,20 @@ function App() {
       setMessage(successMessage);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Операция не выполнена.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function openLesson(lessonId: string) {
+    setLoading(true);
+    setError(null);
+    try {
+      const selectedLesson = await apiRequest<Lesson>(account, `/api/lessons/${lessonId}`);
+      setState((current) => ({ ...current, selectedLesson }));
+      setMessage("Урок открыт.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось открыть урок.");
     } finally {
       setLoading(false);
     }
@@ -277,6 +317,8 @@ function App() {
       {account.role === "STUDENT" && (
         <StudentDashboard
           firstModule={firstModule}
+          lessons={state.lessons}
+          selectedLesson={state.selectedLesson}
           submissions={state.submissions}
           validationJobs={state.validationJobs}
           reports={state.reports}
@@ -291,6 +333,7 @@ function App() {
               "Submission создан, validation job поставлен в очередь."
             )
           }
+          onSelectLesson={openLesson}
           onCreateReport={(payload) =>
             withRefresh(
               () =>
@@ -409,14 +452,19 @@ function UserCard({ account }: { account: DemoAccount }) {
 
 function StudentDashboard({
   firstModule,
+  lessons,
+  selectedLesson,
   submissions,
   validationJobs,
   reports,
   assignments,
   onCreateSubmission,
+  onSelectLesson,
   onCreateReport
 }: {
   firstModule?: LearningModule;
+  lessons: LessonSummary[];
+  selectedLesson?: Lesson;
   submissions: Submission[];
   validationJobs: ValidationJob[];
   reports: Report[];
@@ -427,6 +475,7 @@ function StudentDashboard({
     applicationPort: number;
     healthPath: string;
   }) => Promise<void>;
+  onSelectLesson: (lessonId: string) => Promise<void>;
   onCreateReport: (payload: {
     moduleId: string;
     submissionId?: string;
@@ -445,6 +494,43 @@ function StudentDashboard({
 
   return (
     <section className="grid">
+      <article className="card wide">
+        <h2>Учебные материалы модуля</h2>
+        {!firstModule ? (
+          <EmptyState>Нет активного модуля.</EmptyState>
+        ) : (
+          <>
+            <p className="muted">
+              {firstModule.title}: {firstModule.vulnerabilityTopic}
+            </p>
+            <div className="lesson-layout">
+              <div className="lesson-list" aria-label="Список уроков">
+                {lessons.map((lesson) => (
+                  <button
+                    key={lesson.id}
+                    type="button"
+                    className={lesson.id === selectedLesson?.id ? "lesson-item active" : "lesson-item"}
+                    onClick={() => void onSelectLesson(lesson.id)}
+                  >
+                    {lesson.position}. {lesson.title}
+                  </button>
+                ))}
+              </div>
+              <div className="lesson-content">
+                {selectedLesson ? (
+                  <>
+                    <h3>{selectedLesson.title}</h3>
+                    <pre>{selectedLesson.contentMarkdown}</pre>
+                  </>
+                ) : (
+                  <EmptyState>Материалы пока не опубликованы.</EmptyState>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </article>
+
       <article className="card">
         <h2>Student: сдача Docker image</h2>
         {!firstModule ? (
