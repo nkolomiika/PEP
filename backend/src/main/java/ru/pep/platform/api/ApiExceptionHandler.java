@@ -8,6 +8,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import ru.pep.platform.service.AuthSessionService;
 import ru.pep.platform.service.CorePlatformService;
 
 @RestControllerAdvice
@@ -21,6 +22,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler({CorePlatformService.AccessDeniedException.class, AccessDeniedException.class})
     ResponseEntity<Map<String, String>> accessDenied(RuntimeException exception) {
         return error(HttpStatus.FORBIDDEN, "ACCESS_DENIED", exception.getMessage());
+    }
+
+    @ExceptionHandler(AuthSessionService.TooManyLoginAttemptsException.class)
+    ResponseEntity<Map<String, String>> tooManyLoginAttempts(RuntimeException exception) {
+        return error(HttpStatus.TOO_MANY_REQUESTS, "AUTH_RATE_LIMITED", exception.getMessage());
     }
 
     @ExceptionHandler({

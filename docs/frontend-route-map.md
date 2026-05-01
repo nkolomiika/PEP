@@ -8,6 +8,11 @@
 | `/` | authenticated | Redirect по роли |
 | `/profile` | authenticated | Профиль и уведомления |
 
+Frontend показывает форму входа и отправляет учетные данные в `POST /api/auth/login`. Backend
+устанавливает `HttpOnly` session cookie, после чего роль, email и display name проверяются через
+`GET /api/me`. Перед login и другими небезопасными запросами frontend получает CSRF token через
+`GET /api/auth/csrf` и отправляет его в `X-XSRF-TOKEN`; demo-пароли не должны храниться в client bundle.
+
 ## Student routes
 
 | Route | Сценарий | API |
@@ -86,7 +91,14 @@ Admin dashboard показывает количество approved submissions, 
 - Формы white box и black box отчетов позволяют приложить файл evidence.
 - Куратор видит report content и preview своего feedback в формате markdown.
 - Куратор видит список вложений, приложенных к отчету.
+- Вложения отображаются как ссылки на backend download endpoint, чтобы права доступа проверялись API.
 - Очередь куратора фильтруется по статусу, типу отчета и email автора.
+
+Markdown preview рендерится без `dangerouslySetInnerHTML`: HTML остается текстом React, ссылки
+разрешены только для `http`, `https`, относительных URL и anchors, а внешние ссылки получают
+`rel="noopener noreferrer"`.
+Backend ограничивает размер пользовательского Markdown, поэтому frontend должен показывать ошибку API,
+если отчет или комментарий превышают production limits.
 
 ## Live Statuses
 

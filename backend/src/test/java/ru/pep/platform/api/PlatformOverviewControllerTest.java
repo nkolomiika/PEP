@@ -11,11 +11,13 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
+import ru.pep.platform.config.SessionAuthenticationFilter;
 import ru.pep.platform.config.SecurityConfig;
 import ru.pep.platform.repository.AppUserRepository;
+import ru.pep.platform.service.AuthSessionService;
 
 @WebMvcTest(PlatformOverviewController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, SessionAuthenticationFilter.class})
 class PlatformOverviewControllerTest {
 
     @Autowired
@@ -23,6 +25,9 @@ class PlatformOverviewControllerTest {
 
     @MockBean
     private AppUserRepository users;
+
+    @MockBean
+    private AuthSessionService authSessionService;
 
     @Test
     void returnsPlatformRoles() throws Exception {
