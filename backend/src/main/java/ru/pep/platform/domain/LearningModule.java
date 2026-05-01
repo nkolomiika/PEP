@@ -90,4 +90,10 @@ public class LearningModule {
     public ModuleStatus getStatus() {
         return status;
     }
+
+    public void updateDetails(String title, String vulnerabilityTopic, ModuleStatus status) {
+        this.title = title;
+        this.vulnerabilityTopic = vulnerabilityTopic;
+        this.status = status;
+    }
 }

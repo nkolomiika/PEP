@@ -6,16 +6,23 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import ru.pep.platform.domain.Submission;
+import ru.pep.platform.domain.SubmissionSourceType;
 import ru.pep.platform.domain.ValidationJob;
 import ru.pep.platform.domain.ValidationJobStatus;
 import ru.pep.platform.repository.ValidationJobRepository;
@@ -28,6 +35,7 @@ public class ValidationWorkerService {
     private final HttpClient httpClient;
     private final TransactionTemplate transactions;
     private final String hostAddress;
+    private final String localRegistry;
     private final Duration commandTimeout;
     private final Duration healthTimeout;
 
@@ -35,11 +43,13 @@ public class ValidationWorkerService {
             ValidationJobRepository validationJobs,
             TransactionTemplate transactions,
             @Value("${pep.validation-worker.host-address:host.docker.internal}") String hostAddress,
+            @Value("${pep.validation-worker.local-registry:localhost:5001}") String localRegistry,
             @Value("${pep.validation-worker.command-timeout-seconds:120}") long commandTimeoutSeconds,
             @Value("${pep.validation-worker.health-timeout-seconds:30}") long healthTimeoutSeconds) {
         this.validationJobs = validationJobs;
         this.transactions = transactions;
         this.hostAddress = hostAddress;
+        this.localRegistry = localRegistry;
         this.commandTimeout = Duration.ofSeconds(commandTimeoutSeconds);
         this.healthTimeout = Duration.ofSeconds(healthTimeoutSeconds);
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -62,9 +72,15 @@ public class ValidationWorkerService {
 
     private void validate(java.util.UUID jobId, String containerName) {
         JobSnapshot snapshot = markPullingImage(jobId);
-        runCommand(List.of("docker", "pull", snapshot.imageReference()));
-        scanImage(jobId, snapshot);
-        scanDependencies(jobId, snapshot);
+        String runtimeImageReference = snapshot.imageReference();
+        if (snapshot.sourceType() == SubmissionSourceType.ARCHIVE) {
+            runtimeImageReference = buildArchiveImage(jobId, snapshot);
+        } else {
+            runCommand(List.of("docker", "pull", runtimeImageReference));
+        }
+        JobSnapshot runtimeSnapshot = snapshot.withImageReference(runtimeImageReference);
+        scanImage(jobId, runtimeSnapshot);
+        scanDependencies(jobId, runtimeSnapshot);
 
         markStartingContainer(jobId);
         runCommand(List.of(
@@ -75,19 +91,141 @@ public class ValidationWorkerService {
                 "--name",
                 containerName,
                 "-p",
-                snapshot.applicationPort().toString(),
-                snapshot.imageReference()));
+                runtimeSnapshot.applicationPort().toString(),
+                runtimeSnapshot.imageReference()));
 
         markCheckingPort(jobId);
-        String hostPort = publishedHostPort(containerName, snapshot.applicationPort());
+        String hostPort = publishedHostPort(containerName, runtimeSnapshot.applicationPort());
         checkHttpEndpoint("http://" + hostAddress + ":" + hostPort + "/");
 
-        if (snapshot.healthPath() != null && !snapshot.healthPath().isBlank()) {
+        if (runtimeSnapshot.healthPath() != null && !runtimeSnapshot.healthPath().isBlank()) {
             markCheckingHealth(jobId);
-            checkHttpEndpoint("http://" + hostAddress + ":" + hostPort + snapshot.healthPath());
+            checkHttpEndpoint("http://" + hostAddress + ":" + hostPort + runtimeSnapshot.healthPath());
         }
 
         passJob(jobId);
+    }
+
+    private String buildArchiveImage(java.util.UUID jobId, JobSnapshot snapshot) {
+        if (snapshot.archiveStoragePath() == null || snapshot.archiveStoragePath().isBlank()) {
+            throw new IllegalStateException("Archive submission не содержит путь к архиву");
+        }
+        Path archivePath = Path.of(snapshot.archiveStoragePath()).toAbsolutePath().normalize();
+        if (!Files.isRegularFile(archivePath)) {
+            throw new IllegalStateException("Архив стенда не найден");
+        }
+        Path workDir = null;
+        try {
+            workDir = Files.createTempDirectory("pep-stand-build-");
+            extractArchive(archivePath, workDir);
+            validateBuildContext(workDir);
+            String runtimeImage = localRegistry + "/student-lab-" + jobId.toString().substring(0, 8) + ":latest";
+            if (Files.exists(workDir.resolve("docker-compose.yml")) || Files.exists(workDir.resolve("compose.yaml"))) {
+                buildComposeImage(workDir, runtimeImage, snapshot.composeService());
+            } else if (Files.exists(workDir.resolve("Dockerfile"))) {
+                runCommand(List.of("docker", "build", "-t", runtimeImage, "."), workDir);
+            } else {
+                throw new IllegalStateException("В архиве нужен Dockerfile или docker-compose.yml");
+            }
+            runCommand(List.of("docker", "push", runtimeImage));
+            updateJob(jobId, job -> job.useBuiltImage(runtimeImage));
+            return runtimeImage;
+        } catch (IOException exception) {
+            throw new IllegalStateException("Не удалось подготовить архив стенда");
+        } finally {
+            deleteDirectory(workDir);
+        }
+    }
+
+    private void buildComposeImage(Path workDir, String runtimeImage, String requestedService) {
+        String composeFile = Files.exists(workDir.resolve("docker-compose.yml")) ? "docker-compose.yml" : "compose.yaml";
+        String service = requestedService;
+        if (service == null || service.isBlank()) {
+            service = runCompose(composeFile, List.of("config", "--services"), workDir)
+                    .output()
+                    .lines()
+                    .filter(line -> !line.isBlank())
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalStateException("docker-compose.yml не содержит services"));
+        }
+        runCompose(composeFile, List.of("build", service), workDir);
+        String serviceImage = runCompose(composeFile, List.of("images", "-q", service), workDir)
+                .output()
+                .lines()
+                .filter(line -> !line.isBlank())
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("Не удалось определить image для compose service"));
+        runCommand(List.of("docker", "tag", serviceImage, runtimeImage));
+    }
+
+    private CommandResult runCompose(String composeFile, List<String> args, Path workingDirectory) {
+        List<String> dockerCompose = new java.util.ArrayList<>(List.of("docker", "compose", "-f", composeFile));
+        dockerCompose.addAll(args);
+        try {
+            return runCommand(dockerCompose, workingDirectory);
+        } catch (IllegalStateException firstFailure) {
+            List<String> legacyCompose = new java.util.ArrayList<>(List.of("docker-compose", "-f", composeFile));
+            legacyCompose.addAll(args);
+            return runCommand(legacyCompose, workingDirectory);
+        }
+    }
+
+    private void extractArchive(Path archivePath, Path destination) throws IOException {
+        String filename = archivePath.getFileName().toString().toLowerCase();
+        if (filename.endsWith(".zip")) {
+            extractZip(archivePath, destination);
+            return;
+        }
+        if (filename.endsWith(".tar") || filename.endsWith(".tar.gz") || filename.endsWith(".tgz")) {
+            runCommand(List.of("tar", "-xf", archivePath.toString(), "-C", destination.toString()));
+            return;
+        }
+        throw new IllegalStateException("Неподдерживаемый формат архива");
+    }
+
+    private void extractZip(Path archivePath, Path destination) throws IOException {
+        try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(archivePath))) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                Path target = destination.resolve(entry.getName()).normalize();
+                if (!target.startsWith(destination)) {
+                    throw new IllegalStateException("Архив содержит небезопасный путь");
+                }
+                if (entry.isDirectory()) {
+                    Files.createDirectories(target);
+                } else {
+                    Files.createDirectories(target.getParent());
+                    Files.copy(zip, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        }
+    }
+
+    private void validateBuildContext(Path workDir) throws IOException {
+        List<String> forbiddenFragments = List.of(
+                "privileged: true",
+                "network_mode: host",
+                "pid: host",
+                "/var/run/docker.sock",
+                "host.docker.internal");
+        try (var paths = Files.walk(workDir)) {
+            paths.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().equals("docker-compose.yml")
+                            || path.getFileName().toString().equals("compose.yaml")
+                            || path.getFileName().toString().equals("Dockerfile"))
+                    .forEach(path -> {
+                        try {
+                            String content = Files.readString(path).toLowerCase();
+                            forbiddenFragments.forEach(fragment -> {
+                                if (content.contains(fragment)) {
+                                    throw new IllegalStateException("Архив содержит запрещенную настройку: " + fragment);
+                                }
+                            });
+                        } catch (IOException exception) {
+                            throw new IllegalStateException("Не удалось прочитать build descriptor");
+                        }
+                    });
+        }
     }
 
     private void scanImage(java.util.UUID jobId, JobSnapshot snapshot) {
@@ -197,7 +335,13 @@ public class ValidationWorkerService {
                     .orElseThrow(() -> new CorePlatformService.NotFoundException("Validation job не найден"));
             Submission submission = job.getSubmission();
             job.markPullingImage();
-            return new JobSnapshot(job.getImageReference(), submission.getApplicationPort(), submission.getHealthPath());
+            return new JobSnapshot(
+                    job.getImageReference(),
+                    submission.getSourceType(),
+                    submission.getArchiveStoragePath(),
+                    submission.getComposeService(),
+                    submission.getApplicationPort(),
+                    submission.getHealthPath());
         });
     }
 
@@ -272,7 +416,14 @@ public class ValidationWorkerService {
     }
 
     private CommandResult runCommand(List<String> command) {
+        return runCommand(command, null);
+    }
+
+    private CommandResult runCommand(List<String> command, Path workingDirectory) {
         ProcessBuilder builder = new ProcessBuilder(command);
+        if (workingDirectory != null) {
+            builder.directory(workingDirectory.toFile());
+        }
         builder.redirectErrorStream(true);
         try {
             Process process = builder.start();
@@ -291,6 +442,21 @@ public class ValidationWorkerService {
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Docker command interrupted");
+        }
+    }
+
+    private void deleteDirectory(Path directory) {
+        if (directory == null || !Files.exists(directory)) {
+            return;
+        }
+        try (var paths = Files.walk(directory)) {
+            paths.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException ignored) {
+                }
+            });
+        } catch (IOException ignored) {
         }
     }
 
@@ -322,6 +488,21 @@ public class ValidationWorkerService {
     private record DependencyScanResult(String summary, String report, boolean hasWarnings) {
     }
 
-    private record JobSnapshot(String imageReference, Integer applicationPort, String healthPath) {
+    private record JobSnapshot(
+            String imageReference,
+            SubmissionSourceType sourceType,
+            String archiveStoragePath,
+            String composeService,
+            Integer applicationPort,
+            String healthPath) {
+        private JobSnapshot withImageReference(String nextImageReference) {
+            return new JobSnapshot(
+                    nextImageReference,
+                    sourceType,
+                    archiveStoragePath,
+                    composeService,
+                    applicationPort,
+                    healthPath);
+        }
     }
 }

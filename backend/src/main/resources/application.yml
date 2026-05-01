@@ -1,6 +1,10 @@
 spring:
   application:
     name: pep-backend
+  servlet:
+    multipart:
+      max-file-size: ${PEP_MULTIPART_MAX_FILE_SIZE:10MB}
+      max-request-size: ${PEP_MULTIPART_MAX_REQUEST_SIZE:12MB}
   datasource:
     url: ${PEP_DATABASE_URL:jdbc:h2:mem:pep;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE}
     username: ${PEP_DATABASE_USERNAME:pep}
@@ -23,6 +27,23 @@ management:
         enabled: true
 
 pep:
+  auth:
+    session-ttl-hours: ${PEP_AUTH_SESSION_TTL_HOURS:8}
+    cookie-secure: ${PEP_AUTH_COOKIE_SECURE:true}
+    basic-enabled: ${PEP_AUTH_BASIC_ENABLED:false}
+    csrf-enabled: ${PEP_AUTH_CSRF_ENABLED:true}
+    login:
+      max-failed-attempts: ${PEP_AUTH_LOGIN_MAX_FAILED_ATTEMPTS:5}
+      failed-window-minutes: ${PEP_AUTH_LOGIN_FAILED_WINDOW_MINUTES:15}
+      lock-minutes: ${PEP_AUTH_LOGIN_LOCK_MINUTES:15}
+    cleanup:
+      interval-ms: ${PEP_AUTH_CLEANUP_INTERVAL_MS:3600000}
+      initial-delay-ms: ${PEP_AUTH_CLEANUP_INITIAL_DELAY_MS:60000}
+      expired-retention-hours: ${PEP_AUTH_CLEANUP_EXPIRED_RETENTION_HOURS:24}
+      revoked-retention-hours: ${PEP_AUTH_CLEANUP_REVOKED_RETENTION_HOURS:24}
+      throttle-retention-hours: ${PEP_AUTH_CLEANUP_THROTTLE_RETENTION_HOURS:24}
+  demo-data:
+    enabled: ${PEP_DEMO_DATA_ENABLED:false}
   labs:
     namespace-prefix: pep-labs
     default-cpu-limit: "500m"
@@ -36,3 +57,12 @@ pep:
     host-address: ${PEP_VALIDATION_WORKER_HOST_ADDRESS:host.docker.internal}
     command-timeout-seconds: ${PEP_VALIDATION_WORKER_COMMAND_TIMEOUT_SECONDS:120}
     health-timeout-seconds: ${PEP_VALIDATION_WORKER_HEALTH_TIMEOUT_SECONDS:30}
+    local-registry: ${PEP_VALIDATION_WORKER_LOCAL_REGISTRY:localhost:5001}
+  gitlab:
+    base-url: ${PEP_GITLAB_BASE_URL:http://localhost:8929}
+    token: ${PEP_GITLAB_TOKEN:}
+    group: ${PEP_GITLAB_GROUP:pep-tasks}
+    default-branch: ${PEP_GITLAB_DEFAULT_BRANCH:main}
+  pentest-tasks:
+    default-duration-minutes: ${PEP_PENTEST_TASK_DEFAULT_DURATION_MINUTES:240}
+    local-registry: ${PEP_PENTEST_TASK_LOCAL_REGISTRY:localhost:5001}

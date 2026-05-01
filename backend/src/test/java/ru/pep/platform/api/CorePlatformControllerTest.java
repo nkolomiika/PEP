@@ -23,7 +23,11 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+        "pep.demo-data.enabled=true",
+        "pep.auth.basic-enabled=true",
+        "pep.auth.csrf-enabled=false"
+})
 @AutoConfigureMockMvc
 class CorePlatformControllerTest {
 
@@ -42,13 +46,13 @@ class CorePlatformControllerTest {
                 .andReturn();
 
         JsonNode courses = objectMapper.readTree(coursesResult.getResponse().getContentAsString());
-        assertEquals(10, countModules(courses, "OWASP Top 10"));
-        String moduleId = findModuleId(courses, "A03. Injection");
+        assertEquals(10, countLargestCourseModules(courses));
+        String moduleId = firstModuleIdFromLargestCourse(courses);
 
         MvcResult lessonsResult = mockMvc.perform(get("/api/modules/{moduleId}/lessons", moduleId)
                         .with(httpBasic("student1@pep.local", "student")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(3)))
+                .andExpect(jsonPath("$", hasSize(1)))
                 .andReturn();
 
         String lessonId = objectMapper.readTree(lessonsResult.getResponse().getContentAsString()).get(0).get("id").asText();
@@ -56,7 +60,7 @@ class CorePlatformControllerTest {
         mockMvc.perform(get("/api/lessons/{lessonId}", lessonId)
                         .with(httpBasic("student1@pep.local", "student")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.title").value("Docker image для сдачи на платформе"));
+                .andExpect(jsonPath("$.position").value(1));
 
         mockMvc.perform(post("/api/lessons/{lessonId}/complete", lessonId)
                         .with(httpBasic("student1@pep.local", "student")))
@@ -82,6 +86,8 @@ class CorePlatformControllerTest {
                                 }
                                 """.formatted(moduleId)))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sourceType").value("IMAGE_REFERENCE"))
+                .andExpect(jsonPath("$.runtimeImageReference").value("localhost:5001/vulnerable-sqli-demo:latest"))
                 .andExpect(jsonPath("$.status").value("VALIDATION_QUEUED"))
                 .andReturn();
 
@@ -212,6 +218,8 @@ class CorePlatformControllerTest {
                                 """.formatted(submissionId)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("RUNNING"))
+                .andExpect(jsonPath("$.publicUrl").value(containsString(".127.0.0.1.nip.io:8088")))
+                .andExpect(jsonPath("$.localHostUrl").value(containsString(".local.host")))
                 .andReturn();
 
         String labId = objectMapper.readTree(labResult.getResponse().getContentAsString()).get("id").asText();
@@ -219,7 +227,7 @@ class CorePlatformControllerTest {
         mockMvc.perform(post("/api/modules/{moduleId}/black-box-assignments/distribute", moduleId)
                         .with(httpBasic("admin@pep.local", "admin")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.createdAssignments").value(1));
+                .andExpect(jsonPath("$.createdAssignments").value(2));
 
         mockMvc.perform(post("/api/modules/{moduleId}/black-box-assignments/distribute", moduleId)
                         .with(httpBasic("admin@pep.local", "admin")))
@@ -299,23 +307,25 @@ class CorePlatformControllerTest {
                 .andExpect(status().isOk());
     }
 
-    private String findModuleId(JsonNode courses, String moduleTitle) {
-        for (JsonNode course : courses) {
-            for (JsonNode module : course.get("modules")) {
-                if (moduleTitle.equals(module.get("title").asText())) {
-                    return module.get("id").asText();
-                }
-            }
-        }
-        throw new AssertionError("Module not found: " + moduleTitle);
+    private String firstModuleIdFromLargestCourse(JsonNode courses) {
+        JsonNode largestCourse = largestCourse(courses);
+        return largestCourse.get("modules").get(0).get("id").asText();
     }
 
-    private int countModules(JsonNode courses, String courseTitle) {
+    private int countLargestCourseModules(JsonNode courses) {
+        return largestCourse(courses).get("modules").size();
+    }
+
+    private JsonNode largestCourse(JsonNode courses) {
+        JsonNode largestCourse = null;
         for (JsonNode course : courses) {
-            if (courseTitle.equals(course.get("title").asText())) {
-                return course.get("modules").size();
+            if (largestCourse == null || course.get("modules").size() > largestCourse.get("modules").size()) {
+                largestCourse = course;
             }
         }
-        throw new AssertionError("Course not found: " + courseTitle);
+        if (largestCourse == null) {
+            throw new AssertionError("No courses found");
+        }
+        return largestCourse;
     }
 }

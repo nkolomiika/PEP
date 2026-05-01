@@ -8,7 +8,11 @@
 ## Общие правила
 
 - Формат данных: JSON.
-- Авторизация: authenticated requests для всех endpoint, кроме login и health.
+- Авторизация: authenticated requests для всех endpoint, кроме login, CSRF token, overview и health.
+- CSRF: все небезопасные методы (`POST`, `PUT`, `PATCH`, `DELETE`) должны отправлять header
+  `X-XSRF-TOKEN`, полученный через `GET /api/auth/csrf`.
+- Security headers: API responses должны включать deny-by-default `Content-Security-Policy`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` и ограничительный `Permissions-Policy`.
 - Права доступа: проверяются на уровне роли и конкретного объекта.
 - Ошибки возвращаются в едином формате.
 
@@ -21,11 +25,49 @@
 }
 ```
 
+Security layer использует тот же JSON-формат: unauthenticated private API возвращает
+`401 AUTHENTICATION_REQUIRED`, authenticated-but-forbidden действия возвращают `403 ACCESS_DENIED`.
+
 ## Auth
+
+### `GET /api/auth/csrf`
+
+Назначение: выдать CSRF token для cookie-based authentication. Frontend вызывает endpoint перед
+`POST /api/auth/login` и переиспользует token для последующих небезопасных запросов.
+
+Response:
+
+```json
+{
+  "token": "csrf-token",
+  "headerName": "X-XSRF-TOKEN",
+  "parameterName": "_csrf"
+}
+```
+
+### `GET /api/me`
+
+Назначение: проверить текущие учетные данные и получить профиль пользователя. В текущей реализации
+запрос защищен session cookie; frontend получает роль из этого endpoint.
+
+Response:
+
+```json
+{
+  "email": "student@example.com",
+  "displayName": "Студент",
+  "role": "STUDENT"
+}
+```
 
 ### `POST /api/auth/login`
 
-Назначение: вход пользователя.
+Назначение: создать server-side session и установить `HttpOnly` cookie `PEP_SESSION`.
+Требует CSRF header.
+Валидация payload: `email` должен быть корректным email до 320 символов, `password` - непустая
+строка до 256 символов.
+Повторные ошибки входа ограничиваются по normalized email и remote address; при превышении лимита
+endpoint возвращает `429 AUTH_RATE_LIMITED`.
 
 Request:
 
@@ -40,15 +82,16 @@ Response:
 
 ```json
 {
-  "accessToken": "jwt",
-  "refreshToken": "jwt",
+  "email": "student@example.com",
+  "displayName": "Студент",
   "role": "STUDENT"
 }
 ```
 
 ### `POST /api/auth/logout`
 
-Назначение: завершение сессии.
+Назначение: отозвать текущую server-side session и очистить cookie.
+Требует CSRF header.
 
 ## Courses
 
@@ -75,6 +118,8 @@ Response:
 ### `GET /api/lessons/{lessonId}`
 
 Назначение: открыть урок с Markdown-контентом и примерами кода.
+Frontend обязан рендерить Markdown безопасно: без raw HTML injection и без кликабельных опасных
+link schemes.
 
 ### `GET /api/modules/{moduleId}/lesson-progress`
 
@@ -101,7 +146,8 @@ Response:
 
 Роль: студент.
 
-Назначение: отправить Docker image reference и white box отчет.
+Назначение: отправить готовый Docker image reference. Это fallback-режим для студентов, которые уже
+собрали и опубликовали image в local registry.
 
 Request:
 
@@ -111,7 +157,7 @@ Request:
   "imageReference": "localhost:5001/vulnerable-sqli-demo:latest",
   "applicationPort": 8080,
   "healthPath": "/health",
-  "whiteBoxReportMarkdown": "# SQL Injection\n..."
+  "healthPath": "/health"
 }
 ```
 
@@ -119,11 +165,37 @@ Response:
 
 ```json
 {
-  "submissionId": "uuid",
+  "id": "uuid",
+  "sourceType": "IMAGE_REFERENCE",
+  "imageReference": "localhost:5001/vulnerable-sqli-demo:latest",
+  "runtimeImageReference": "localhost:5001/vulnerable-sqli-demo:latest",
   "status": "VALIDATION_QUEUED",
-  "validationJobId": "uuid"
+  "applicationPort": 8080,
+  "healthPath": "/health"
 }
 ```
+
+### `POST /api/submissions/archive`
+
+Роль: студент.
+
+Назначение: загрузить архив проекта со стендом. Архив может содержать `Dockerfile` или
+`docker-compose.yml`. Платформа сохраняет архив, ставит validation job в очередь, worker распаковывает
+проект, собирает runtime image, публикует его в local registry и дальше запускает стандартную
+technical-only validation.
+
+Content type: `multipart/form-data`.
+
+Поля:
+
+- `moduleId` - UUID модуля;
+- `archive` - `.zip`, `.tar`, `.tar.gz` или `.tgz`;
+- `applicationPort` - порт web-сервиса внутри контейнера;
+- `healthPath` - optional health endpoint, по умолчанию `/health`;
+- `composeService` - optional имя web-сервиса из `docker-compose.yml`.
+
+Response содержит `sourceType: "ARCHIVE"`, `archiveFilename`, `runtimeImageReference` после сборки,
+а после создания lab - `publicUrl` и `localHostUrl`.
 
 ### `GET /api/submissions/{submissionId}`
 
@@ -205,6 +277,7 @@ Response:
 Роль: куратор.
 
 Назначение: принять решение по отчету.
+Production limit: `commentMarkdown` до 8 000 символов.
 
 Request:
 
@@ -289,6 +362,8 @@ Response включает Kubernetes metadata и demo-команды:
 Роль: студент.
 
 Назначение: отправить white box или black box отчет в формате markdown.
+Markdown считается пользовательским контентом и должен отображаться только безопасным renderer.
+Production limit: `title` до 180 символов, `contentMarkdown` до 20 000 символов.
 
 `ReportResponse` включает `attachments` - список метаданных загруженных вложений:
 
@@ -306,10 +381,18 @@ Response включает Kubernetes metadata и demo-команды:
 
 ### `POST /api/reports/{reportId}/attachments`
 
-Роль: студент, куратор или администратор.
+Роль: студент.
 
 Назначение: загрузить файл evidence к отчету через `multipart/form-data` поле `file`. Студент может
 добавлять вложения только к своим отчетам; куратор и администратор видят вложения в очереди проверки.
+
+### `GET /api/report-attachments/{attachmentId}`
+
+Роль: студент, куратор или администратор.
+
+Назначение: безопасно скачать файл evidence через backend. Автор отчета, куратор и администратор
+получают файл с `Content-Disposition: attachment`; другой студент получает `403 ACCESS_DENIED`.
+Успешное скачивание пишет audit event `REPORT_ATTACHMENT_DOWNLOADED` с `reportId` в metadata.
 
 ### `POST /api/reports/black-box`
 
@@ -324,3 +407,15 @@ Response включает Kubernetes metadata и demo-команды:
 Роль: администратор.
 
 Назначение: просмотреть audit events.
+
+Auth-события, которые должны попадать в audit trail:
+
+- `AUTH_LOGIN_SUCCESS` - успешный вход, actor равен пользователю, metadata содержит `remoteAddress`;
+- `AUTH_LOGOUT` - завершение server-side session;
+- `AUTH_LOGIN_FAILED` - неверные учетные данные, actor пустой, metadata содержит `emailHash`, `remoteAddress`, `locked`;
+- `AUTH_LOGIN_RATE_LIMITED` - попытка входа во время блокировки throttle window.
+
+Inactive server-side sessions очищаются scheduled cleanup job: expired sessions и revoked sessions
+удаляются после настроенного retention, активные sessions не должны удаляться cleanup job.
+Login throttle rows также очищаются scheduled cleanup job после отдельного retention, чтобы таблица
+не росла из-за старых неуспешных попыток входа.

@@ -89,4 +89,14 @@ public class AppUser {
     public UserStatus getStatus() {
         return status;
     }
+
+    public void updateProfile(String displayName, Role role, UserStatus status) {
+        this.displayName = displayName;
+        this.role = role;
+        this.status = status;
+    }
+
+    public void disable() {
+        this.status = UserStatus.DISABLED;
+    }
 }

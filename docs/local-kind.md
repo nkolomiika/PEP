@@ -45,9 +45,9 @@ flowchart TD
 1. Установить Docker Desktop.
 2. Запустить `registry` и `k8s-toolbox` через Docker Compose.
 3. Создать `kind` cluster из toolbox container.
-4. Опубликовать тестовый vulnerable app image в local registry.
+4. Загрузить archive submission через UI или опубликовать тестовый vulnerable app image в local registry.
 5. Применить Kubernetes manifests из toolbox container.
-6. Запустить техническую проверку image.
+6. Запустить техническую проверку archive/image.
 7. Установить ingress controller.
 8. Опубликовать lab instance.
 9. Открыть lab через ingress URL из toolbox/Admin dashboard.
@@ -87,7 +87,13 @@ docker compose exec k8s-toolbox pep-kind-create
 docker compose ps registry
 ```
 
-## Публикация student image
+## Загрузка student archive или публикация image
+
+Основной сценарий для студента - загрузить `.zip`, `.tar`, `.tar.gz` или `.tgz` архив проекта через
+форму `Student: загрузка стенда`. В архиве должен быть `Dockerfile` или `docker-compose.yml`.
+Validation worker распакует архив, соберет runtime image и отправит его в local registry.
+
+Fallback-сценарий для готового image:
 
 Пример для уязвимого приложения:
 
@@ -97,7 +103,7 @@ docker compose exec k8s-toolbox docker tag vulnerable-sqli-demo:latest localhost
 docker compose exec k8s-toolbox docker push localhost:5001/vulnerable-sqli-demo:latest
 ```
 
-Image reference для сдачи на платформе:
+Image reference для fallback-сдачи на платформе:
 
 ```text
 localhost:5001/vulnerable-sqli-demo:latest
@@ -138,11 +144,20 @@ docker compose exec k8s-toolbox kubectl get pods,svc,ingress -n pep-lab-<submiss
 docker compose exec k8s-toolbox pep-ingress-install
 ```
 
-После `pep-lab-deploy` lab открывается через ingress URL:
+После `pep-lab-deploy` lab открывается через ingress URL без настройки hosts:
 
 ```text
 http://lab-<submissionId-prefix>.127.0.0.1.nip.io:8088
 ```
+
+UI также показывает красивый локальный домен:
+
+```text
+http://lab-<submissionId-prefix>.local.host
+```
+
+Для `*.local.host` нужен локальный DNS/proxy или hosts-настройка. Поэтому `nip.io` остается
+основным рабочим URL для демонстрации.
 
 Port-forward остается fallback-вариантом:
 

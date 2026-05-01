@@ -5,13 +5,20 @@ import "./styles.css";
 type Role = "STUDENT" | "CURATOR" | "ADMIN";
 type ReportType = "WHITE_BOX" | "BLACK_BOX";
 type ReviewDecision = "APPROVED" | "NEEDS_REVISION" | "REJECTED";
+type SubmissionSourceType = "IMAGE_REFERENCE" | "ARCHIVE";
 
-type DemoAccount = {
+type AuthCredentials = {
   email: string;
   password: string;
-  role: Role;
-  label: string;
 };
+
+type AccountSession = {
+  email: string;
+  role: Role;
+  displayName: string;
+};
+
+type AppPage = "workspace" | "courses" | "profile";
 
 type Course = {
   id: string;
@@ -47,6 +54,17 @@ type Lesson = {
   position: number;
 };
 
+type MarkdownHeading = {
+  id: string;
+  title: string;
+  level: number;
+};
+
+type MarkdownHeadingGroup = {
+  heading: MarkdownHeading;
+  children: MarkdownHeading[];
+};
+
 type LessonProgress = {
   lessonId: string;
   completed: boolean;
@@ -58,9 +76,17 @@ type Submission = {
   moduleId: string;
   studentEmail: string;
   imageReference: string;
+  sourceType: SubmissionSourceType;
+  archiveFilename?: string;
+  composeService?: string;
+  buildContext?: string;
+  runtimeImageReference?: string;
+  publicUrl?: string;
+  localHostUrl?: string;
   applicationPort: number;
   healthPath: string;
   status: string;
+  createdAt?: string;
 };
 
 type ValidationJob = {
@@ -132,6 +158,10 @@ type Lab = {
   submissionId: string;
   studentEmail: string;
   imageReference: string;
+  sourceType: SubmissionSourceType;
+  runtimeImageReference?: string;
+  publicUrl?: string;
+  localHostUrl?: string;
   namespace: string;
   deploymentName: string;
   serviceName: string;
@@ -164,6 +194,31 @@ type LiveStatus = {
   updatedAt: string;
 };
 
+type CurrentUser = {
+  email: string;
+  displayName: string;
+  role: Role;
+};
+
+type AdminUser = {
+  id: string;
+  email: string;
+  displayName: string;
+  role: Role;
+  status: string;
+};
+
+type OnlineUsers = {
+  activeUsers: number;
+  activeSessions: number;
+};
+
+type CsrfToken = {
+  token: string;
+  headerName: string;
+  parameterName: string;
+};
+
 type ApiState = {
   courses: Course[];
   submissions: Submission[];
@@ -178,15 +233,21 @@ type ApiState = {
   labs: Lab[];
   assignments: BlackBoxAssignment[];
   auditEvents: AuditEvent[];
+  users: AdminUser[];
+  onlineUsers?: OnlineUsers;
 };
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
-
-const demoAccounts: DemoAccount[] = [
-  { email: "student1@pep.local", password: "student", role: "STUDENT", label: "Студент 1" },
-  { email: "curator@pep.local", password: "curator", role: "CURATOR", label: "Куратор" },
-  { email: "admin@pep.local", password: "admin", role: "ADMIN", label: "Администратор" }
-];
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
+const REPORT_MARKDOWN_MAX_LENGTH = 20_000;
+const REVIEW_COMMENT_MAX_LENGTH = 8_000;
+const LOGIN_EMAIL_MAX_LENGTH = 320;
+const LOGIN_PASSWORD_MAX_LENGTH = 256;
+const DEFAULT_IMAGE_REFERENCE = "localhost:5001/vulnerable-sqli-demo:latest";
+const DEFAULT_WHITEBOX_REPORT =
+  "Payload: ' OR '1'='1\nEvidence: login bypass воспроизводится.";
+const DEFAULT_BLACKBOX_REPORT =
+  "Target: назначенный lab\nPayload: ' OR '1'='1\nEvidence: результат поиска раскрывает лишние данные.";
+let csrfTokenCache: CsrfToken | null = null;
 
 const statusLabels: Record<string, string> = {
   ACTIVE: "Активен",
@@ -218,68 +279,172 @@ const roleLabels: Record<Role, string> = {
   ADMIN: "Администратор"
 };
 
-function authHeader(account: DemoAccount) {
-  return `Basic ${btoa(`${account.email}:${account.password}`)}`;
+function isUnsafeMethod(method?: string) {
+  const normalized = (method ?? "GET").toUpperCase();
+  return normalized !== "GET" && normalized !== "HEAD" && normalized !== "OPTIONS" && normalized !== "TRACE";
 }
 
-async function apiRequest<T>(account: DemoAccount, path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...init,
+async function csrfHeaders(init?: RequestInit): Promise<Record<string, string>> {
+  if (!isUnsafeMethod(init?.method)) {
+    return {};
+  }
+
+  if (!csrfTokenCache) {
+    const response = await fetch(`${apiBaseUrl}/api/auth/csrf`, {
+      credentials: "include"
+    });
+    if (!response.ok) {
+      throw new Error(`Не удалось получить CSRF token: ${response.status}`);
+    }
+    csrfTokenCache = (await response.json()) as CsrfToken;
+  }
+
+  return { [csrfTokenCache.headerName]: csrfTokenCache.token };
+}
+
+async function loginRequest(credentials: AuthCredentials): Promise<CurrentUser> {
+  const csrf = await csrfHeaders({ method: "POST" });
+  const response = await fetch(`${apiBaseUrl}/api/auth/login`, {
+    method: "POST",
+    credentials: "include",
     headers: {
-      Authorization: authHeader(account),
       "Content-Type": "application/json",
+      ...csrf
+    },
+    body: JSON.stringify(credentials)
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(formatApiError(response.status, error, "Не удалось выполнить вход"));
+  }
+
+  return response.json() as Promise<CurrentUser>;
+}
+
+async function logoutRequest(): Promise<void> {
+  const csrf = await csrfHeaders({ method: "POST" });
+  await fetch(`${apiBaseUrl}/api/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+    headers: csrf
+  });
+  csrfTokenCache = null;
+}
+
+async function apiRequest<T>(_account: AccountSession, path: string, init?: RequestInit): Promise<T> {
+  const requestUrl = `${apiBaseUrl}${path}`;
+  const csrf = await csrfHeaders(init);
+  const response = await fetch(requestUrl, {
+    ...init,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...csrf,
       ...init?.headers
     }
   });
 
   if (!response.ok) {
     const error = await response.json().catch(() => null);
-    throw new Error(error?.message ?? `Ошибка API: ${response.status}`);
+    throw new Error(formatApiError(response.status, error, `Запрос ${path} не выполнен`));
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
   }
 
   return response.json() as Promise<T>;
 }
 
-async function uploadReportAttachment(account: DemoAccount, reportId: string, file: File): Promise<ReportAttachment> {
+async function uploadReportAttachment(_account: AccountSession, reportId: string, file: File): Promise<ReportAttachment> {
   const formData = new FormData();
   formData.append("file", file);
+  const csrf = await csrfHeaders({ method: "POST" });
 
   const response = await fetch(`${apiBaseUrl}/api/reports/${reportId}/attachments`, {
     method: "POST",
-    headers: {
-      Authorization: authHeader(account)
-    },
+    credentials: "include",
+    headers: csrf,
     body: formData
   });
 
   if (!response.ok) {
     const error = await response.json().catch(() => null);
-    throw new Error(error?.message ?? `Ошибка API: ${response.status}`);
+    throw new Error(formatApiError(response.status, error, "Не удалось загрузить вложение"));
   }
 
   return response.json() as Promise<ReportAttachment>;
 }
 
-async function downloadText(account: DemoAccount, path: string): Promise<string> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    headers: {
-      Authorization: authHeader(account)
-    }
+async function uploadSubmissionArchive(
+  _account: AccountSession,
+  payload: {
+    moduleId: string;
+    archive: File;
+    applicationPort: number;
+    healthPath: string;
+    composeService: string;
+  }
+): Promise<Submission> {
+  const formData = new FormData();
+  formData.append("moduleId", payload.moduleId);
+  formData.append("applicationPort", String(payload.applicationPort));
+  formData.append("healthPath", payload.healthPath);
+  if (payload.composeService.trim()) {
+    formData.append("composeService", payload.composeService.trim());
+  }
+  formData.append("archive", payload.archive);
+  const csrf = await csrfHeaders({ method: "POST" });
+
+  const response = await fetch(`${apiBaseUrl}/api/submissions/archive`, {
+    method: "POST",
+    credentials: "include",
+    headers: csrf,
+    body: formData
   });
 
   if (!response.ok) {
     const error = await response.json().catch(() => null);
-    throw new Error(error?.message ?? `Ошибка API: ${response.status}`);
+    throw new Error(formatApiError(response.status, error, "Не удалось загрузить архив стенда"));
+  }
+
+  return response.json() as Promise<Submission>;
+}
+
+async function downloadText(_account: AccountSession, path: string): Promise<string> {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    credentials: "include"
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(formatApiError(response.status, error, `Не удалось скачать ${path}`));
   }
 
   return response.text();
 }
 
-function liveStatusStreamUrl(account: DemoAccount) {
-  const url = new URL("/api/live/status-stream", apiBaseUrl);
-  url.username = account.email;
-  url.password = account.password;
-  return url.toString();
+function formatApiError(status: number, error: unknown, fallback: string) {
+  const payload = error as { code?: string; message?: string } | null;
+  const statusText: Record<number, string> = {
+    400: "Проверьте данные формы",
+    401: "Нужно войти в систему",
+    403: "Недостаточно прав для этой операции",
+    404: "Данные не найдены",
+    409: "Операция конфликтует с текущим состоянием",
+    413: "Файл слишком большой",
+    429: "Слишком много попыток, повторите позже",
+    500: "Внутренняя ошибка сервера"
+  };
+  const message = payload?.message || statusText[status] || fallback;
+  const code = payload?.code ? ` (${payload.code})` : "";
+  return `${message}${code}. HTTP ${status}.`;
+}
+
+function liveStatusStreamUrl() {
+  const baseUrl = apiBaseUrl || window.location.origin;
+  return new URL("/api/live/status-stream", baseUrl).toString();
 }
 
 function StatusBadge({ value }: { value: string }) {
@@ -290,8 +455,8 @@ function EmptyState({ children }: { children: React.ReactNode }) {
   return <p className="muted empty">{children}</p>;
 }
 
-function MarkdownPreview({ source }: { source: string }) {
-  const rendered = useMemo(() => renderMarkdown(source), [source]);
+function MarkdownPreview({ source, withHeadingIds = false }: { source: string; withHeadingIds?: boolean }) {
+  const rendered = useMemo(() => renderMarkdown(source, withHeadingIds), [source, withHeadingIds]);
 
   if (source.trim().length === 0) {
     return <EmptyState>Markdown preview появится после ввода текста.</EmptyState>;
@@ -300,9 +465,10 @@ function MarkdownPreview({ source }: { source: string }) {
   return <div className="markdown-preview">{rendered}</div>;
 }
 
-function renderMarkdown(source: string) {
+function renderMarkdown(source: string, withHeadingIds = false) {
   const lines = source.replace(/\r\n/g, "\n").split("\n");
   const elements: React.ReactNode[] = [];
+  const uniqueSlug = createUniqueSlugFactory();
   let index = 0;
 
   while (index < lines.length) {
@@ -333,13 +499,20 @@ function renderMarkdown(source: string) {
     if (heading) {
       const level = heading[1].length;
       const content = renderInlineMarkdown(heading[2]);
+      const id = withHeadingIds ? uniqueSlug(plainMarkdownText(heading[2])) : undefined;
       elements.push(
         level === 1 ? (
-          <h1 key={`heading-${index}`}>{content}</h1>
+          <h1 key={`heading-${index}`} id={id}>
+            {content}
+          </h1>
         ) : level === 2 ? (
-          <h2 key={`heading-${index}`}>{content}</h2>
+          <h2 key={`heading-${index}`} id={id}>
+            {content}
+          </h2>
         ) : (
-          <h3 key={`heading-${index}`}>{content}</h3>
+          <h3 key={`heading-${index}`} id={id}>
+            {content}
+          </h3>
         )
       );
       index++;
@@ -396,6 +569,110 @@ function renderMarkdown(source: string) {
   return elements;
 }
 
+function extractMarkdownHeadings(source: string): MarkdownHeading[] {
+  const uniqueSlug = createUniqueSlugFactory();
+  return source
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => /^(#{2,3})\s+(.+)$/.exec(line))
+    .filter((match): match is RegExpExecArray => Boolean(match))
+    .map((match) => {
+      const title = plainMarkdownText(match[2]);
+      return {
+        id: uniqueSlug(title),
+        title,
+        level: match[1].length
+      };
+    });
+}
+
+function groupMarkdownHeadings(headings: MarkdownHeading[]): MarkdownHeadingGroup[] {
+  const groups: MarkdownHeadingGroup[] = [];
+  headings.forEach((heading) => {
+    if (heading.level <= 2 || groups.length === 0) {
+      groups.push({ heading, children: [] });
+      return;
+    }
+    groups[groups.length - 1].children.push(heading);
+  });
+  return groups;
+}
+
+function createUniqueSlugFactory() {
+  const seen = new Map<string, number>();
+  return (value: string) => {
+    const baseSlug = slugify(value) || "section";
+    const count = seen.get(baseSlug) ?? 0;
+    seen.set(baseSlug, count + 1);
+    return count === 0 ? baseSlug : `${baseSlug}-${count + 1}`;
+  };
+}
+
+function plainMarkdownText(value: string) {
+  return value
+    .replace(/\[[^\]]+\]\(([^)]+)\)/g, "$1")
+    .replace(/[`*_]/g, "")
+    .trim();
+}
+
+function slugify(value: string) {
+  const transliteration: Record<string, string> = {
+    а: "a",
+    б: "b",
+    в: "v",
+    г: "g",
+    д: "d",
+    е: "e",
+    ё: "e",
+    ж: "zh",
+    з: "z",
+    и: "i",
+    й: "y",
+    к: "k",
+    л: "l",
+    м: "m",
+    н: "n",
+    о: "o",
+    п: "p",
+    р: "r",
+    с: "s",
+    т: "t",
+    у: "u",
+    ф: "f",
+    х: "h",
+    ц: "c",
+    ч: "ch",
+    ш: "sh",
+    щ: "sch",
+    ъ: "",
+    ы: "y",
+    ь: "",
+    э: "e",
+    ю: "yu",
+    я: "ya"
+  };
+  return value
+    .toLowerCase()
+    .split("")
+    .map((char) => transliteration[char] ?? char)
+    .join("")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function webSecurityPath(module: ModuleOption) {
+  const source = `${module.title} ${module.vulnerabilityTopic}`.toLowerCase();
+  if (source.includes("cors")) return "/web-security/cors";
+  if (source.includes("injection") || source.includes("sql")) return "/web-security/sql-injection";
+  if (source.includes("access")) return "/web-security/access-control";
+  if (source.includes("crypto")) return "/web-security/cryptography";
+  if (source.includes("ssrf")) return "/web-security/ssrf";
+  if (source.includes("authentication")) return "/web-security/authentication";
+  if (source.includes("configuration")) return "/web-security/security-misconfiguration";
+  if (source.includes("components")) return "/web-security/vulnerable-components";
+  return `/web-security/${slugify(module.vulnerabilityTopic || module.title)}`;
+}
+
 function isMarkdownBlockStart(line: string) {
   const trimmed = line.trim();
   return (
@@ -408,7 +685,7 @@ function isMarkdownBlockStart(line: string) {
 }
 
 function renderInlineMarkdown(text: string) {
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g);
   return parts.map((part, index) => {
     if (part.startsWith("`") && part.endsWith("`")) {
       return <code key={index}>{part.slice(1, -1)}</code>;
@@ -416,8 +693,37 @@ function renderInlineMarkdown(text: string) {
     if (part.startsWith("**") && part.endsWith("**")) {
       return <strong key={index}>{part.slice(2, -2)}</strong>;
     }
+    const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(part);
+    if (link) {
+      return <SafeMarkdownLink key={index} label={link[1]} href={link[2]} />;
+    }
     return part;
   });
+}
+
+function SafeMarkdownLink({ label, href }: { label: string; href: string }) {
+  const safeHref = normalizeSafeMarkdownHref(href);
+  if (!safeHref) {
+    return <span className="muted">{label}</span>;
+  }
+  return (
+    <a href={safeHref} target="_blank" rel="noopener noreferrer">
+      {label}
+    </a>
+  );
+}
+
+function normalizeSafeMarkdownHref(href: string) {
+  const trimmed = href.trim();
+  if (trimmed.startsWith("/") || trimmed.startsWith("#")) {
+    return trimmed;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 function ReportAttachmentsList({ attachments }: { attachments: ReportAttachment[] }) {
@@ -429,7 +735,9 @@ function ReportAttachmentsList({ attachments }: { attachments: ReportAttachment[
     <ul className="attachment-list">
       {attachments.map((attachment) => (
         <li key={attachment.id}>
-          <strong>{attachment.originalFilename}</strong>
+          <a href={`${apiBaseUrl}/api/report-attachments/${attachment.id}`}>
+            {attachment.originalFilename}
+          </a>
           <span className="muted">
             {attachment.contentType}, {formatBytes(attachment.sizeBytes)}
           </span>
@@ -533,7 +841,7 @@ function countByStatus(items: Array<{ status: string }>) {
 }
 
 function App() {
-  const [account, setAccount] = useState<DemoAccount>(demoAccounts[0]);
+  const [account, setAccount] = useState<AccountSession | null>(null);
   const [state, setState] = useState<ApiState>({
     courses: [],
     submissions: [],
@@ -547,13 +855,24 @@ function App() {
     selectedModuleId: undefined,
     labs: [],
     assignments: [],
-    auditEvents: []
+    auditEvents: [],
+    users: [],
+    onlineUsers: undefined
   });
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("Выберите demo-пользователя и загрузите данные.");
+  const [message, setMessage] = useState("Войдите в систему, чтобы загрузить рабочую область.");
   const [error, setError] = useState<string | null>(null);
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
   const [liveConnected, setLiveConnected] = useState(false);
+  const [activePage, setActivePage] = useState<AppPage>("workspace");
+
+  useEffect(() => {
+    if (!error) {
+      return undefined;
+    }
+    const timeoutId = window.setTimeout(() => setError(null), 10_000);
+    return () => window.clearTimeout(timeoutId);
+  }, [error]);
 
   const moduleOptions = useMemo(
     () =>
@@ -574,7 +893,56 @@ function App() {
     [moduleOptions, selectedModule]
   );
 
-  async function loadDashboard(activeAccount = account) {
+  async function login(credentials: AuthCredentials) {
+    setLoading(true);
+    setError(null);
+    try {
+      const currentUser = await loginRequest(credentials);
+      const nextAccount: AccountSession = {
+        email: currentUser.email,
+        role: currentUser.role,
+        displayName: currentUser.displayName
+      };
+      setAccount(nextAccount);
+      const loaded = await loadDashboard(nextAccount);
+      if (loaded) {
+        setActivePage("courses");
+        setMessage("Вход выполнен.");
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось выполнить вход.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function logout() {
+    void logoutRequest();
+    setAccount(null);
+    setLiveStatus(null);
+    setLiveConnected(false);
+    setActivePage("workspace");
+    setState({
+      courses: [],
+      submissions: [],
+      validationJobs: [],
+      reports: [],
+      reviews: [],
+      lessons: [],
+      selectedLesson: undefined,
+      lessonProgress: [],
+      moduleResult: undefined,
+      selectedModuleId: undefined,
+      labs: [],
+      assignments: [],
+      auditEvents: [],
+      users: [],
+      onlineUsers: undefined
+    });
+    setMessage("Сессия завершена.");
+  }
+
+  async function loadDashboard(activeAccount: AccountSession): Promise<boolean> {
     setLoading(true);
     setError(null);
     try {
@@ -594,14 +962,6 @@ function App() {
       const selectedLesson = lessons[0]
         ? await apiRequest<Lesson>(activeAccount, `/api/lessons/${lessons[0].id}`)
         : undefined;
-      const lessonProgress =
-        activeAccount.role === "STUDENT" && nextSelectedModule
-          ? await apiRequest<LessonProgress[]>(activeAccount, `/api/modules/${nextSelectedModule.id}/lesson-progress`)
-          : [];
-      const moduleResult =
-        activeAccount.role === "STUDENT" && nextSelectedModule
-          ? await apiRequest<ModuleResult>(activeAccount, `/api/modules/${nextSelectedModule.id}/result`)
-          : undefined;
       const labs =
         activeAccount.role === "ADMIN" || activeAccount.role === "CURATOR"
           ? await apiRequest<Lab[]>(activeAccount, "/api/labs")
@@ -612,6 +972,12 @@ function App() {
           : [];
       const auditEvents =
         activeAccount.role === "ADMIN" ? await apiRequest<AuditEvent[]>(activeAccount, "/api/audit") : [];
+      const users =
+        activeAccount.role === "ADMIN" ? await apiRequest<AdminUser[]>(activeAccount, "/api/admin/users") : [];
+      const onlineUsers =
+        activeAccount.role === "ADMIN"
+          ? await apiRequest<OnlineUsers>(activeAccount, "/api/admin/online-users")
+          : undefined;
       setState({
         courses,
         submissions,
@@ -620,27 +986,30 @@ function App() {
         reviews,
         lessons,
         selectedLesson,
-        lessonProgress,
-        moduleResult,
+        lessonProgress: [],
+        moduleResult: undefined,
         selectedModuleId: nextSelectedModule?.id,
         labs,
         assignments,
-        auditEvents
+        auditEvents,
+        users,
+        onlineUsers
       });
       setMessage("Данные загружены.");
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось загрузить данные.");
+      return false;
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    void loadDashboard(account);
-  }, [account]);
-
-  useEffect(() => {
-    const events = new EventSource(liveStatusStreamUrl(account));
+    if (!account) {
+      return undefined;
+    }
+    const events = new EventSource(liveStatusStreamUrl(), { withCredentials: true });
     events.onopen = () => setLiveConnected(true);
     events.addEventListener("status", (event) => {
       setLiveStatus(JSON.parse((event as MessageEvent).data) as LiveStatus);
@@ -653,52 +1022,44 @@ function App() {
     };
   }, [account]);
 
-  async function withRefresh(action: () => Promise<void>, successMessage: string) {
+  async function withRefresh(action: () => Promise<void>, successMessage: string): Promise<boolean> {
     setLoading(true);
     setError(null);
     try {
       await action();
-      await loadDashboard(account);
+      if (!account) {
+        throw new Error("Сначала выполните вход.");
+      }
+      const loaded = await loadDashboard(account);
+      if (!loaded) {
+        return false;
+      }
       setMessage(successMessage);
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Операция не выполнена.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function openLesson(lessonId: string) {
-    setLoading(true);
-    setError(null);
-    try {
-      const selectedLesson = await apiRequest<Lesson>(account, `/api/lessons/${lessonId}`);
-      setState((current) => ({ ...current, selectedLesson }));
-      setMessage("Урок открыт.");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Не удалось открыть урок.");
+      return false;
     } finally {
       setLoading(false);
     }
   }
 
   async function selectModule(moduleId: string) {
+    if (!account) {
+      setError("Сначала выполните вход.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const lessons = await apiRequest<LessonSummary[]>(account, `/api/modules/${moduleId}/lessons`);
       const selectedLesson = lessons[0] ? await apiRequest<Lesson>(account, `/api/lessons/${lessons[0].id}`) : undefined;
-      const lessonProgress =
-        account.role === "STUDENT"
-          ? await apiRequest<LessonProgress[]>(account, `/api/modules/${moduleId}/lesson-progress`)
-          : [];
-      const moduleResult =
-        account.role === "STUDENT" ? await apiRequest<ModuleResult>(account, `/api/modules/${moduleId}/result`) : undefined;
       setState((current) => ({
         ...current,
         lessons,
         selectedLesson,
-        lessonProgress,
-        moduleResult,
+        lessonProgress: [],
+        moduleResult: undefined,
         selectedModuleId: moduleId
       }));
       setMessage("Учебный модуль открыт.");
@@ -710,6 +1071,10 @@ function App() {
   }
 
   async function exportGrades(moduleId: string) {
+    if (!account) {
+      setError("Сначала выполните вход.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -729,84 +1094,89 @@ function App() {
   }
 
   return (
-    <main className="page">
-      <section className="hero">
-        <p className="eyebrow">Practical Exploitation Platform</p>
-        <h1>PEP: практическая платформа по информационной безопасности</h1>
-        <p>
-          Demo-интерфейс покрывает core MVP: курс OWASP Top 10, отправку Docker image, technical
-          validation, white box отчет, проверку куратора и audit trail.
-        </p>
-      </section>
+    <main className="app-shell">
+      {!account ? (
+        <section className="login-screen">
+          <LoginForm onLogin={login} disabled={loading} />
+        </section>
+      ) : (
+        <>
+          <TopNavigation
+            account={account}
+            activePage={activePage}
+            loading={loading}
+            onSelectPage={setActivePage}
+            onLogout={logout}
+          />
+          {loading && <div className="loading-line" aria-label="Загрузка" />}
+          {error && (
+            <div className="toast error" role="alert">
+              <strong>Ошибка</strong>
+              <span>{error}</span>
+            </div>
+          )}
+        </>
+      )}
 
-      <section className="toolbar card">
-        <div>
-          <label htmlFor="account">Demo-пользователь</label>
-          <select
-            id="account"
-            value={account.email}
-            onChange={(event) => {
-              const nextAccount = demoAccounts.find((item) => item.email === event.target.value);
-              if (nextAccount) {
-                setAccount(nextAccount);
-              }
-            }}
-          >
-            {demoAccounts.map((item) => (
-              <option key={item.email} value={item.email}>
-                {item.label} ({item.email})
-              </option>
-            ))}
-          </select>
-        </div>
-        <button type="button" onClick={() => void loadDashboard()}>
-          Обновить данные
-        </button>
-      </section>
+      {account && activePage === "courses" && (
+        <CoursesPage
+          courses={state.courses}
+          selectedModuleId={state.selectedModuleId}
+          onSelectModule={(moduleId) => {
+            if (account.role === "ADMIN") {
+              setActivePage("workspace");
+              return;
+            }
+            setActivePage("workspace");
+            void selectModule(moduleId);
+          }}
+        />
+      )}
 
-      <LiveStatusCard status={liveStatus} connected={liveConnected} />
+      {account && activePage === "profile" && (
+        <ProfilePage
+          account={account}
+          courses={state.courses}
+          liveStatus={liveStatus}
+          liveConnected={liveConnected}
+          selectedModuleId={state.selectedModuleId}
+          onSelectModule={(moduleId) => {
+            setActivePage("workspace");
+            void selectModule(moduleId);
+          }}
+        />
+      )}
 
-      {loading && <p className="notice">Загрузка...</p>}
-      {error && <p className="notice error">Ошибка: {error}</p>}
-      {!error && <p className="notice">{message}</p>}
-
-      <section className="grid">
-        <CourseCard courses={state.courses} />
-        <UserCard account={account} />
-      </section>
-
-      {account.role === "STUDENT" && (
+      {account?.role === "STUDENT" && activePage === "workspace" && (
         <StudentDashboard
           moduleOptions={moduleOptions}
           selectedModule={selectedModule}
           lessons={state.lessons}
           selectedLesson={state.selectedLesson}
-          lessonProgress={state.lessonProgress}
           moduleResult={state.moduleResult}
           submissions={state.submissions}
           validationJobs={state.validationJobs}
           reports={state.reports}
           reviews={state.reviews}
           assignments={state.assignments}
+          isBusy={loading}
           onSelectModule={selectModule}
-          onCreateSubmission={(payload) =>
-            withRefresh(
+          onCreateSubmission={async (payload) => {
+            await withRefresh(
               () =>
                 apiRequest(account, "/api/submissions", {
                   method: "POST",
                   body: JSON.stringify(payload)
                 }),
               "Submission создан, validation job поставлен в очередь."
-            )
-          }
-          onSelectLesson={openLesson}
-          onCompleteLesson={(lessonId) =>
+            );
+          }}
+          onCreateArchiveSubmission={async (payload) =>
             withRefresh(
-              () =>
-                apiRequest(account, `/api/lessons/${lessonId}/complete`, {
-                  method: "POST"
-                }),
-              "Урок отмечен как изученный."
+              async () => {
+                await uploadSubmissionArchive(account, payload);
+              },
+              "Архив стенда загружен, сборка и technical validation поставлены в очередь."
             )
           }
           onCreateReport={(payload) =>
@@ -827,15 +1197,16 @@ function App() {
         />
       )}
 
-      {account.role === "CURATOR" && (
+      {account?.role === "CURATOR" && activePage === "workspace" && (
         <CuratorDashboard
           firstModule={labModule}
           submissions={state.submissions}
           validationJobs={state.validationJobs}
           reports={state.reports}
+          isBusy={loading}
           onExportGrades={exportGrades}
-          onCompleteValidation={(jobId, passed) =>
-            withRefresh(
+          onCompleteValidation={async (jobId, passed) => {
+            await withRefresh(
               () =>
                 apiRequest(account, `/api/validation-jobs/${jobId}/complete`, {
                   method: "POST",
@@ -846,52 +1217,309 @@ function App() {
                   })
                 }),
               passed ? "Validation job отмечен как успешный." : "Validation job отмечен как ошибочный."
-            )
-          }
-          onCreateReview={(payload) =>
-            withRefresh(
+            );
+          }}
+          onCreateReview={async (payload) => {
+            await withRefresh(
               () =>
                 apiRequest(account, "/api/reviews", {
                   method: "POST",
                   body: JSON.stringify(payload)
                 }),
               "Решение куратора сохранено."
-            )
-          }
+            );
+          }}
         />
       )}
 
-      {account.role === "ADMIN" && (
+      {account?.role === "ADMIN" && activePage === "workspace" && (
         <AdminDashboard
           submissions={state.submissions}
           validationJobs={state.validationJobs}
           reports={state.reports}
           labs={state.labs}
           auditEvents={state.auditEvents}
+          courses={state.courses}
+          users={state.users}
+          onlineUsers={state.onlineUsers}
           firstModule={labModule}
-          onExportGrades={exportGrades}
-          onCreateLab={(submissionId) =>
+          isBusy={loading}
+          onRefresh={() => void loadDashboard(account)}
+          onCreateCourse={(payload) =>
             withRefresh(
+              () =>
+                apiRequest(account, "/api/admin/courses", {
+                  method: "POST",
+                  body: JSON.stringify(payload)
+                }),
+              "Курс сохранен."
+            )
+          }
+          onCreateModule={(payload) =>
+            withRefresh(
+              () =>
+                apiRequest(account, "/api/admin/modules", {
+                  method: "POST",
+                  body: JSON.stringify(payload)
+                }),
+              "Модуль сохранен."
+            )
+          }
+          onUpsertLesson={(payload) =>
+            withRefresh(
+              () =>
+                apiRequest(account, "/api/admin/lessons", {
+                  method: "POST",
+                  body: JSON.stringify(payload)
+                }),
+              "Страница модуля сохранена."
+            )
+          }
+          onCreateUser={(payload) =>
+            withRefresh(
+              () =>
+                apiRequest(account, "/api/admin/users", {
+                  method: "POST",
+                  body: JSON.stringify(payload)
+                }),
+              "Пользователь создан."
+            )
+          }
+          onDisableUser={(userId) =>
+            withRefresh(
+              () =>
+                apiRequest(account, `/api/admin/users/${userId}`, {
+                  method: "DELETE"
+                }),
+              "Пользователь удален."
+            )
+          }
+          onExportGrades={exportGrades}
+          onCreateLab={async (submissionId) => {
+            await withRefresh(
               () =>
                 apiRequest(account, "/api/labs", {
                   method: "POST",
                   body: JSON.stringify({ submissionId })
                 }),
               "Lab instance создан для принятой работы."
-            )
-          }
-          onDistribute={(moduleId) =>
-            withRefresh(
+            );
+          }}
+          onDistribute={async (moduleId) => {
+            await withRefresh(
               () =>
                 apiRequest(account, `/api/modules/${moduleId}/black-box-assignments/distribute`, {
                   method: "POST"
                 }),
               "Black box цели распределены."
-            )
-          }
+            );
+          }}
         />
       )}
     </main>
+  );
+}
+
+function TopNavigation({
+  account,
+  activePage,
+  loading,
+  onSelectPage,
+  onLogout
+}: {
+  account: AccountSession;
+  activePage: AppPage;
+  loading: boolean;
+  onSelectPage: (page: AppPage) => void;
+  onLogout: () => void;
+}) {
+  const pages: Array<{ id: AppPage; label: string }> = [
+    { id: "workspace", label: "Рабочая область" },
+    { id: "courses", label: "Курсы" },
+    { id: "profile", label: "Личный кабинет" }
+  ];
+
+  return (
+    <header className="academy-header">
+      <div className="academy-header-top">
+        <div className="academy-brand">
+          <span className="academy-logo-mark">P</span>
+          <div>
+            <strong>PEP Academy</strong>
+            <span>Web Security Training</span>
+          </div>
+        </div>
+        <div className="academy-user">
+          <span>{account.displayName}</span>
+          <small>{roleLabels[account.role]}</small>
+        </div>
+      </div>
+      <div className="academy-header-bottom">
+        <nav className="academy-nav-links" aria-label="Основные разделы">
+          {pages.map((page) => (
+            <button
+              key={page.id}
+              type="button"
+              className={activePage === page.id ? "academy-nav-link active" : "academy-nav-link"}
+              disabled={loading}
+              onClick={() => onSelectPage(page.id)}
+            >
+              {page.label}
+            </button>
+          ))}
+        </nav>
+        <div className="academy-nav-actions">
+          <button type="button" className="academy-action logout-icon" aria-label="Выйти" title="Выйти" disabled={loading} onClick={onLogout}>
+            ⎋
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function CoursesPage({
+  courses,
+  selectedModuleId,
+  onSelectModule
+}: {
+  courses: Course[];
+  selectedModuleId?: string;
+  onSelectModule: (moduleId: string) => void;
+}) {
+  return (
+    <section className="page-section courses-page">
+      {courses.length === 0 ? (
+        <EmptyState>Курсы пока не загружены.</EmptyState>
+      ) : (
+        <div className="course-category-list">
+          {courses.map((course) => (
+            <details key={course.id} className="course-category" open>
+              <summary>
+                <span>{course.title}</span>
+                <span className="course-category-arrow" aria-hidden="true" />
+              </summary>
+              <p>{course.description}</p>
+              <div className="course-card-row">
+                {course.modules.map((module) => (
+                  <button
+                    key={module.id}
+                    type="button"
+                    className={module.id === selectedModuleId ? "course-tile active" : "course-tile"}
+                    onClick={() => onSelectModule(module.id)}
+                  >
+                    <span className="course-tile-cover">
+                      <span>{module.title}</span>
+                    </span>
+                    <span className="course-tile-title">
+                      {module.title}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ProfilePage({
+  account,
+  courses,
+  liveStatus,
+  liveConnected,
+  selectedModuleId,
+  onSelectModule
+}: {
+  account: AccountSession;
+  courses: Course[];
+  liveStatus: LiveStatus | null;
+  liveConnected: boolean;
+  selectedModuleId?: string;
+  onSelectModule: (moduleId: string) => void;
+}) {
+  const modulesCount = courses.reduce((total, course) => total + course.modules.length, 0);
+  const isAdmin = account.role === "ADMIN";
+
+  return (
+    <section className="page-section">
+      <header className="page-section-header">
+        <h1>Личный кабинет</h1>
+      </header>
+      <div className="profile-grid">
+        <article className="profile-card">
+          <h2>{account.displayName}</h2>
+          <p className="muted mono-wrap">{account.email}</p>
+          <StatusBadge value={roleLabels[account.role]} />
+        </article>
+        {!isAdmin && (
+          <article className="profile-card">
+            <h2>Курсы</h2>
+            <p className="big">{courses.length}</p>
+            <p className="muted">Модулей: {modulesCount}</p>
+          </article>
+        )}
+        {!isAdmin && (
+          <article className="profile-card">
+            <h2>Статус</h2>
+            <StatusBadge value={liveConnected ? "ONLINE" : "OFFLINE"} />
+            {liveStatus?.updatedAt && <p className="muted">Обновлено {new Date(liveStatus.updatedAt).toLocaleTimeString("ru-RU")}</p>}
+          </article>
+        )}
+      </div>
+      {!isAdmin && <CoursesPage courses={courses} selectedModuleId={selectedModuleId} onSelectModule={onSelectModule} />}
+    </section>
+  );
+}
+
+function LoginForm({ onLogin, disabled }: { onLogin: (credentials: AuthCredentials) => Promise<void>; disabled: boolean }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const normalizedEmail = email.trim();
+  const canSubmit = !disabled && normalizedEmail.length > 0 && password.length > 0;
+
+  return (
+    <section className="card login-card">
+      <h2>Вход в платформу</h2>
+      <form
+        className="form compact-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!canSubmit) {
+            return;
+          }
+          void onLogin({ email: normalizedEmail, password });
+        }}
+      >
+        <label htmlFor="loginEmail">Email</label>
+        <input
+          id="loginEmail"
+          type="email"
+          autoComplete="username"
+          maxLength={LOGIN_EMAIL_MAX_LENGTH}
+          disabled={disabled}
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          required
+        />
+        <label htmlFor="loginPassword">Пароль</label>
+        <input
+          id="loginPassword"
+          type="password"
+          autoComplete="current-password"
+          maxLength={LOGIN_PASSWORD_MAX_LENGTH}
+          disabled={disabled}
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          required
+        />
+        <button type="submit" disabled={!canSubmit}>
+          Войти
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -907,7 +1535,7 @@ function CourseCard({ courses }: { courses: Course[] }) {
             <h3>{course.title}</h3>
             <p>{course.description}</p>
             <StatusBadge value={course.status} />
-            <ul>
+            <ul className="compact-list">
               {course.modules.map((module) => (
                 <li key={module.id}>
                   {module.title}: {module.vulnerabilityTopic} <StatusBadge value={module.status} />
@@ -921,14 +1549,15 @@ function CourseCard({ courses }: { courses: Course[] }) {
   );
 }
 
-function UserCard({ account }: { account: DemoAccount }) {
+function UserCard({ account }: { account: AccountSession }) {
   return (
     <article className="card">
       <h2>Текущая роль</h2>
       <p className="big">{roleLabels[account.role]}</p>
-      <p className="muted">{account.email}</p>
+      <p>{account.displayName}</p>
+      <p className="muted mono-wrap">{account.email}</p>
       <p>
-        Доступы управляются backend через HTTP Basic и роли `STUDENT`, `CURATOR`, `ADMIN`.
+        Роль и профиль подтверждены backend через `/api/me`.
       </p>
     </article>
   );
@@ -974,35 +1603,36 @@ function LiveStatusCard({ status, connected }: { status: LiveStatus | null; conn
   );
 }
 
+type StudentSectionId = "learning" | "progress" | "practice";
+
 function StudentDashboard({
   moduleOptions,
   selectedModule,
   lessons,
   selectedLesson,
-  lessonProgress,
   moduleResult,
   submissions,
   validationJobs,
   reports,
   reviews,
   assignments,
+  isBusy,
   onSelectModule,
   onCreateSubmission,
-  onSelectLesson,
-  onCompleteLesson,
+  onCreateArchiveSubmission,
   onCreateReport
 }: {
   moduleOptions: ModuleOption[];
   selectedModule?: ModuleOption;
   lessons: LessonSummary[];
   selectedLesson?: Lesson;
-  lessonProgress: LessonProgress[];
   moduleResult?: ModuleResult;
   submissions: Submission[];
   validationJobs: ValidationJob[];
   reports: Report[];
   reviews: Review[];
   assignments: BlackBoxAssignment[];
+  isBusy: boolean;
   onSelectModule: (moduleId: string) => Promise<void>;
   onCreateSubmission: (payload: {
     moduleId: string;
@@ -1010,8 +1640,13 @@ function StudentDashboard({
     applicationPort: number;
     healthPath: string;
   }) => Promise<void>;
-  onSelectLesson: (lessonId: string) => Promise<void>;
-  onCompleteLesson: (lessonId: string) => Promise<void>;
+  onCreateArchiveSubmission: (payload: {
+    moduleId: string;
+    archive: File;
+    applicationPort: number;
+    healthPath: string;
+    composeService: string;
+  }) => Promise<boolean>;
   onCreateReport: (payload: {
     moduleId: string;
     submissionId?: string;
@@ -1020,101 +1655,270 @@ function StudentDashboard({
     title: string;
     contentMarkdown: string;
     attachment?: File | null;
-  }) => Promise<void>;
+  }) => Promise<boolean>;
 }) {
-  const [imageReference, setImageReference] = useState("localhost:5001/vulnerable-sqli-demo:latest");
-  const [reportText, setReportText] = useState("Payload: ' OR '1'='1\nEvidence: login bypass воспроизводится.");
+  const [imageReference, setImageReference] = useState(DEFAULT_IMAGE_REFERENCE);
+  const [standArchive, setStandArchive] = useState<File | null>(null);
+  const [archiveInputVersion, setArchiveInputVersion] = useState(0);
+  const [applicationPort, setApplicationPort] = useState(8080);
+  const [healthPath, setHealthPath] = useState("/health");
+  const [composeService, setComposeService] = useState("");
+  const [reportText, setReportText] = useState(DEFAULT_WHITEBOX_REPORT);
   const [reportAttachment, setReportAttachment] = useState<File | null>(null);
-  const [blackBoxReportText, setBlackBoxReportText] = useState(
-    "Target: назначенный lab\nPayload: ' OR '1'='1\nEvidence: результат поиска раскрывает лишние данные."
-  );
-  const [blackBoxReportAttachment, setBlackBoxReportAttachment] = useState<File | null>(null);
-  const latestSubmission = submissions.find((submission) => submission.moduleId === selectedModule?.id);
-  const completedLessonIds = useMemo(
-    () => new Set(lessonProgress.filter((item) => item.completed).map((item) => item.lessonId)),
-    [lessonProgress]
-  );
+  const [reportAttachmentInputVersion, setReportAttachmentInputVersion] = useState(0);
+  const [blackBoxReportTexts, setBlackBoxReportTexts] = useState<Record<string, string>>({});
+  const [blackBoxReportAttachments, setBlackBoxReportAttachments] = useState<Record<string, File | null>>({});
+  const [blackBoxAttachmentInputVersions, setBlackBoxAttachmentInputVersions] = useState<Record<string, number>>({});
+  const latestSubmission = useMemo(() => {
+    const moduleSubmissions = submissions.filter((submission) => submission.moduleId === selectedModule?.id);
+    if (moduleSubmissions.length === 0) {
+      return undefined;
+    }
+    const submissionsWithCreatedAt = moduleSubmissions.filter((submission) => submission.createdAt);
+    if (submissionsWithCreatedAt.length === 0) {
+      return moduleSubmissions[moduleSubmissions.length - 1];
+    }
+    return [...submissionsWithCreatedAt].sort((left, right) => {
+      const leftTime = left.createdAt ? Date.parse(left.createdAt) : Number.NaN;
+      const rightTime = right.createdAt ? Date.parse(right.createdAt) : Number.NaN;
+      if (!Number.isNaN(leftTime) && !Number.isNaN(rightTime)) {
+        return rightTime - leftTime;
+      }
+      if (Number.isNaN(leftTime) && Number.isNaN(rightTime)) {
+        return 0;
+      }
+      return Number.isNaN(leftTime) ? 1 : -1;
+    })[0];
+  }, [selectedModule?.id, submissions]);
   const reviewsByReportId = useMemo(
     () => new Map(reviews.map((review) => [review.reportId, review])),
     [reviews]
   );
-  const selectedLessonCompleted = selectedLesson ? completedLessonIds.has(selectedLesson.id) : false;
   const reviewedReportsCount = reports.filter((report) => reviewsByReportId.has(report.id)).length;
   const submittedAssignmentsCount = assignments.filter((assignment) => assignment.status === "SUBMITTED").length;
+  const [activeSection, setActiveSection] = useState<StudentSectionId>("learning");
+  const blackBoxDefaultTemplate = DEFAULT_BLACKBOX_REPORT;
+  const normalizedImageReference = imageReference.trim();
+  const normalizedWhiteBoxReport = reportText.trim();
+  const normalizedHealthPath = healthPath.trim() || "/health";
+  const selectedLessonHeadings = useMemo(
+    () => (selectedLesson ? extractMarkdownHeadings(selectedLesson.contentMarkdown) : []),
+    [selectedLesson]
+  );
+  const selectedLessonHeadingGroups = useMemo(
+    () => groupMarkdownHeadings(selectedLessonHeadings),
+    [selectedLessonHeadings]
+  );
+  const selectedLessonPath = selectedModule ? webSecurityPath(selectedModule) : "/web-security";
+  const selectedModuleIndex = selectedModule
+    ? moduleOptions.findIndex((module) => module.id === selectedModule.id)
+    : -1;
+  const previousModule = selectedModuleIndex > 0 ? moduleOptions[selectedModuleIndex - 1] : undefined;
+  const nextModule =
+    selectedModuleIndex >= 0 && selectedModuleIndex < moduleOptions.length - 1
+      ? moduleOptions[selectedModuleIndex + 1]
+      : undefined;
+
+  function openLessonAnchor(anchorId: string) {
+    window.history.pushState(null, "", `${selectedLessonPath}#${anchorId}`);
+    document.getElementById(anchorId)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+
+  function blackBoxText(assignmentId: string) {
+    return blackBoxReportTexts[assignmentId] ?? blackBoxDefaultTemplate;
+  }
+
+  function blackBoxAttachment(assignmentId: string) {
+    return blackBoxReportAttachments[assignmentId] ?? null;
+  }
+
+  function hasBlackBoxContent(assignmentId: string) {
+    return blackBoxText(assignmentId).trim().length > 0;
+  }
+
+  function clearBlackBoxDraft(assignmentId: string) {
+    setBlackBoxReportTexts((current) => {
+      const next = { ...current };
+      delete next[assignmentId];
+      return next;
+    });
+    setBlackBoxReportAttachments((current) => {
+      const next = { ...current };
+      delete next[assignmentId];
+      return next;
+    });
+    setBlackBoxAttachmentInputVersions((current) => ({
+      ...current,
+      [assignmentId]: (current[assignmentId] ?? 0) + 1
+    }));
+  }
+
+  useEffect(() => {
+    // Module switch should not keep old evidence files/drafts.
+    setReportText(DEFAULT_WHITEBOX_REPORT);
+    setReportAttachment(null);
+    setReportAttachmentInputVersion((current) => current + 1);
+    setBlackBoxReportTexts({});
+    setBlackBoxReportAttachments({});
+    setBlackBoxAttachmentInputVersions({});
+  }, [selectedModule?.id]);
+
+  useEffect(() => {
+    if (activeSection !== "learning" || !selectedModule || !selectedLesson) {
+      return;
+    }
+    const requestedAnchor = window.location.hash.replace("#", "");
+    const initialAnchor = selectedLessonHeadings.some((heading) => heading.id === requestedAnchor)
+      ? requestedAnchor
+      : selectedLessonHeadings[0]?.id;
+    const nextUrl = initialAnchor ? `${selectedLessonPath}#${initialAnchor}` : selectedLessonPath;
+    if (`${window.location.pathname}${window.location.hash}` !== nextUrl) {
+      window.history.replaceState(null, "", nextUrl);
+    }
+  }, [activeSection, selectedLesson, selectedLessonHeadings, selectedLessonPath, selectedModule]);
 
   return (
-    <section className="grid">
-      <article className="card wide">
+    <section className="section-panel">
+      <nav className="section-nav" aria-label="Разделы студента">
+        <button
+          type="button"
+          disabled={isBusy}
+          className={activeSection === "learning" ? "section-nav-button active" : "section-nav-button"}
+          onClick={() => setActiveSection("learning")}
+        >
+          Обучение
+          <span className="badge-count">{lessons.length}</span>
+        </button>
+        <button
+          type="button"
+          disabled={isBusy}
+          className={activeSection === "progress" ? "section-nav-button active" : "section-nav-button"}
+          onClick={() => setActiveSection("progress")}
+        >
+          Прогресс
+        </button>
+        <button
+          type="button"
+          disabled={isBusy}
+          className={activeSection === "practice" ? "section-nav-button active" : "section-nav-button"}
+          onClick={() => setActiveSection("practice")}
+        >
+          Практика
+          <span className="badge-count">{submissions.length}</span>
+        </button>
+      </nav>
+
+      <div className="grid">
+      {activeSection === "learning" && <article className="card wide">
         <h2>Учебные материалы модуля</h2>
         {!selectedModule ? (
           <EmptyState>Нет активного модуля.</EmptyState>
         ) : (
-          <>
-            <label htmlFor="moduleSelect">Курс и модуль</label>
-            <select
-              id="moduleSelect"
-              value={selectedModule.id}
-              onChange={(event) => void onSelectModule(event.target.value)}
-            >
-              {moduleOptions.map((module) => (
-                <option key={module.id} value={module.id}>
-                  {module.courseTitle}: {module.title}
-                </option>
-              ))}
-            </select>
-            <p className="muted">
-              {selectedModule.courseTitle}: {selectedModule.title} ({selectedModule.vulnerabilityTopic})
-            </p>
-            <p className="progress-line">
-              Изучено: {completedLessonIds.size} из {lessons.length}
-            </p>
-            <div className="lesson-layout">
-              <div className="lesson-list" aria-label="Список уроков">
-                {lessons.map((lesson) => (
-                  <button
-                    key={lesson.id}
-                    type="button"
-                    className={lesson.id === selectedLesson?.id ? "lesson-item active" : "lesson-item"}
-                    onClick={() => void onSelectLesson(lesson.id)}
-                  >
-                    {completedLessonIds.has(lesson.id) ? "✓ " : ""}
-                    {lesson.position}. {lesson.title}
-                  </button>
-                ))}
-              </div>
-              <div className="lesson-content">
-                {selectedLesson ? (
-                  <>
-                    <h3>{selectedLesson.title}</h3>
-                    <StatusBadge value={selectedLessonCompleted ? "COMPLETED" : "IN_PROGRESS"} />
-                    <pre>{selectedLesson.contentMarkdown}</pre>
-                    {!selectedLessonCompleted && (
-                      <button type="button" onClick={() => void onCompleteLesson(selectedLesson.id)}>
-                        Отметить урок как изученный
-                      </button>
-                    )}
-                  </>
+          <div className="lesson-shell">
+            <aside className="lesson-sidebar" aria-label="Разделы модуля">
+              <p className="lesson-sidebar-title">Разделы модуля</p>
+              <div className="lesson-page-toc compact" aria-label="Разделы модуля">
+                {selectedLessonHeadings.length === 0 ? (
+                  <p className="muted">Разделы появятся после загрузки материала.</p>
                 ) : (
-                  <EmptyState>Материалы пока не опубликованы.</EmptyState>
+                  selectedLessonHeadingGroups.map((group) => (
+                    <details key={group.heading.id} className="toc-tree-group" open>
+                      <summary
+                        onClick={(event) => {
+                          if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+                            return;
+                          }
+                        }}
+                      >
+                        <a
+                          className="lesson-page-toc-link"
+                          href={`${selectedLessonPath}#${group.heading.id}`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            openLessonAnchor(group.heading.id);
+                          }}
+                        >
+                          {group.heading.title}
+                        </a>
+                      </summary>
+                      {group.children.map((heading) => (
+                        <a
+                          key={heading.id}
+                          className="lesson-page-toc-link nested"
+                          href={`${selectedLessonPath}#${heading.id}`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            openLessonAnchor(heading.id);
+                          }}
+                        >
+                          {heading.title}
+                        </a>
+                      ))}
+                    </details>
+                  ))
                 )}
               </div>
+            </aside>
+            <div className="lesson-main">
+              {selectedLesson ? (
+                <>
+                  <p className="lesson-breadcrumbs">
+                    Академия веб-безопасности · <span>{selectedModule.courseTitle}</span> · <span>{selectedModule.title}</span>
+                  </p>
+                  <h1 className="lesson-title">{selectedLesson.title}</h1>
+                  <div className="lesson-meta">
+                    <span>
+                      Тема: <strong>{selectedModule.vulnerabilityTopic}</strong>
+                    </span>
+                    <span>
+                      Урок <strong>{selectedLesson.position}</strong> из <strong>{lessons.length}</strong>
+                    </span>
+                  </div>
+                  <article className="lesson-doc">
+                    <MarkdownPreview source={selectedLesson.contentMarkdown} withHeadingIds />
+                  </article>
+                  <div className="module-step-actions">
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={isBusy || !previousModule}
+                      onClick={() => previousModule && void onSelectModule(previousModule.id)}
+                    >
+                      Предыдущий модуль
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isBusy || !nextModule}
+                      onClick={() => nextModule && void onSelectModule(nextModule.id)}
+                    >
+                      Следующий модуль
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="lesson-empty">
+                  <p className="lesson-breadcrumbs">
+                    Академия веб-безопасности · <span>{selectedModule.courseTitle}</span>
+                  </p>
+                  <h1 className="lesson-title">Материалы пока не опубликованы</h1>
+                </div>
+              )}
             </div>
-          </>
+          </div>
         )}
-      </article>
+      </article>}
 
-      <article className="card wide">
+      {activeSection === "progress" && <article className="card wide">
         <h2>Progress dashboard</h2>
         <div className="chart-grid">
-          <ProgressBar label="Изучение уроков" value={completedLessonIds.size} total={lessons.length} />
           <ProgressBar label="Отчеты с feedback" value={reviewedReportsCount} total={reports.length} />
           <ProgressBar label="Black box цели закрыты" value={submittedAssignmentsCount} total={assignments.length} />
           <StatusDistribution title="Submissions по статусам" counts={countByStatus(submissions)} />
           <StatusDistribution title="Reports по статусам" counts={countByStatus(reports)} />
         </div>
-      </article>
+      </article>}
 
-      <article className="card wide">
+      {activeSection === "progress" && <article className="card wide">
         <h2>Итог модуля</h2>
         {!moduleResult ? (
           <EmptyState>Итог появится после выбора учебного модуля.</EmptyState>
@@ -1144,81 +1948,182 @@ function StudentDashboard({
             </div>
           </div>
         )}
-      </article>
+      </article>}
 
-      <article className="card">
-        <h2>Student: сдача Docker image</h2>
+      {activeSection === "practice" && <article className="card">
+        <h2>Student: загрузка стенда</h2>
         {!selectedModule ? (
           <EmptyState>Нет активного модуля.</EmptyState>
         ) : (
-          <form
-            className="form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void onCreateSubmission({
-                moduleId: selectedModule.id,
-                imageReference,
-                applicationPort: 8080,
-                healthPath: "/health"
-              });
-            }}
-          >
-            <label htmlFor="imageReference">Docker image reference</label>
-            <input
-              id="imageReference"
-              value={imageReference}
-              onChange={(event) => setImageReference(event.target.value)}
-            />
-            <button type="submit">Отправить image на technical validation</button>
-          </form>
+          <div className="stack">
+            <form
+              className="form compact-form"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                if (isBusy || !standArchive) {
+                  return;
+                }
+                const success = await onCreateArchiveSubmission({
+                  moduleId: selectedModule.id,
+                  archive: standArchive,
+                  applicationPort,
+                  healthPath: normalizedHealthPath,
+                  composeService
+                });
+                if (success) {
+                  setStandArchive(null);
+                  setArchiveInputVersion((current) => current + 1);
+                }
+              }}
+            >
+              <label htmlFor="standArchive">Архив проекта (.zip, .tar, .tar.gz)</label>
+              <input
+                key={archiveInputVersion}
+                id="standArchive"
+                type="file"
+                accept=".zip,.tar,.gz,.tgz,.tar.gz"
+                disabled={isBusy}
+                onChange={(event) => setStandArchive(event.target.files?.[0] ?? null)}
+              />
+              {standArchive && (
+                <p className="muted">
+                  Выбрано: {standArchive.name} ({formatBytes(standArchive.size)})
+                </p>
+              )}
+              <label htmlFor="applicationPort">Порт web-сервиса</label>
+              <input
+                id="applicationPort"
+                type="number"
+                min={1}
+                max={65535}
+                disabled={isBusy}
+                value={applicationPort}
+                onChange={(event) => setApplicationPort(Math.min(65535, Math.max(1, Number(event.target.value) || 8080)))}
+              />
+              <label htmlFor="healthPath">Health path</label>
+              <input
+                id="healthPath"
+                disabled={isBusy}
+                value={healthPath}
+                onChange={(event) => setHealthPath(event.target.value)}
+              />
+              <label htmlFor="composeService">Compose service (если в архиве docker-compose.yml)</label>
+              <input
+                id="composeService"
+                disabled={isBusy}
+                placeholder="web"
+                value={composeService}
+                onChange={(event) => setComposeService(event.target.value)}
+              />
+              <button type="submit" disabled={isBusy || !standArchive}>
+                Загрузить архив и поставить на technical validation
+              </button>
+            </form>
+            <details className="advanced-panel">
+              <summary>Advanced: отправить готовый Docker image reference</summary>
+              <form
+                className="form compact-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (isBusy || !normalizedImageReference) {
+                    return;
+                  }
+                  void onCreateSubmission({
+                    moduleId: selectedModule.id,
+                    imageReference: normalizedImageReference,
+                    applicationPort,
+                    healthPath: normalizedHealthPath
+                  });
+                }}
+              >
+                <label htmlFor="imageReference">Docker image reference</label>
+                <input
+                  id="imageReference"
+                  disabled={isBusy}
+                  value={imageReference}
+                  onChange={(event) => setImageReference(event.target.value)}
+                />
+                <button type="submit" disabled={isBusy || !normalizedImageReference}>
+                  Отправить image на technical validation
+                </button>
+              </form>
+            </details>
+          </div>
         )}
         <EntityList
           title="Мои submissions"
           items={submissions}
           render={(submission) => (
             <>
-              <strong>{submission.imageReference}</strong>
+              <strong>{submission.sourceType === "ARCHIVE" ? submission.archiveFilename : submission.imageReference}</strong>
               <StatusBadge value={submission.status} />
+              <p className="muted">Источник: {submission.sourceType === "ARCHIVE" ? "архив проекта" : "Docker image"}</p>
+              {submission.runtimeImageReference && <p className="muted">Runtime image: {submission.runtimeImageReference}</p>}
+              {submission.publicUrl && (
+                <p>
+                  <a href={submission.publicUrl} target="_blank" rel="noopener noreferrer">
+                    {submission.publicUrl}
+                  </a>
+                </p>
+              )}
+              {submission.localHostUrl && <p className="muted">Local domain: {submission.localHostUrl}</p>}
               <p className="muted">Port: {submission.applicationPort}, health: {submission.healthPath}</p>
             </>
           )}
         />
-      </article>
+      </article>}
 
-      <article className="card">
+      {activeSection === "practice" && <article className="card">
         <h2>Student: white box отчет</h2>
         {!selectedModule || !latestSubmission ? (
           <EmptyState>Сначала отправьте Docker image.</EmptyState>
         ) : (
           <form
-            className="form"
-            onSubmit={(event) => {
+            className="form compact-form"
+            onSubmit={async (event) => {
               event.preventDefault();
-              void onCreateReport({
+              if (isBusy) {
+                return;
+              }
+              if (!normalizedWhiteBoxReport) {
+                return;
+              }
+              const success = await onCreateReport({
                 moduleId: selectedModule.id,
                 submissionId: latestSubmission.id,
                 type: "WHITE_BOX",
                 title: "White box отчет по SQL Injection",
-                contentMarkdown: reportText,
+                contentMarkdown: normalizedWhiteBoxReport,
                 attachment: reportAttachment
               });
+              if (success) {
+                setReportAttachment(null);
+                setReportAttachmentInputVersion((current) => current + 1);
+              }
             }}
           >
             <label htmlFor="reportText">Evidence и payload</label>
             <textarea
               id="reportText"
-              rows={6}
+              rows={4}
+              disabled={isBusy}
+              maxLength={REPORT_MARKDOWN_MAX_LENGTH}
               value={reportText}
               onChange={(event) => setReportText(event.target.value)}
             />
+            <p className="muted field-hint">
+              {reportText.length}/{REPORT_MARKDOWN_MAX_LENGTH}
+            </p>
             <div className="preview-panel">
               <strong>Preview отчета</strong>
               <MarkdownPreview source={reportText} />
             </div>
             <label htmlFor="reportAttachment">Вложение с evidence (опционально)</label>
             <input
+              key={reportAttachmentInputVersion}
               id="reportAttachment"
               type="file"
+              disabled={isBusy}
               onChange={(event) => setReportAttachment(event.target.files?.[0] ?? null)}
             />
             {reportAttachment && (
@@ -1226,12 +2131,15 @@ function StudentDashboard({
                 Выбрано: {reportAttachment.name} ({formatBytes(reportAttachment.size)})
               </p>
             )}
-            <button type="submit">Отправить отчет куратору</button>
+            <button type="submit" disabled={isBusy || !normalizedWhiteBoxReport}>
+              Отправить отчет куратору
+            </button>
           </form>
         )}
         <EntityList
           title="Validation jobs"
           items={validationJobs}
+          maxHeight={320}
           render={(job) => (
             <>
               <strong>{job.imageReference}</strong>
@@ -1245,6 +2153,7 @@ function StudentDashboard({
         <EntityList
           title="Мои отчеты"
           items={reports}
+          maxHeight={360}
           render={(report) => (
             <>
               <strong>{report.title}</strong>
@@ -1268,64 +2177,100 @@ function StudentDashboard({
         <EntityList
           title="Мои black box цели"
           items={assignments}
+          maxHeight={420}
           render={(assignment) => (
             <>
               <strong>{assignment.targetUrl}</strong>
               <StatusBadge value={assignment.status} />
               <p className="muted">Image target: {assignment.targetImageReference}</p>
-              {selectedModule && assignment.status !== "SUBMITTED" && (
+              {assignment.status !== "SUBMITTED" && (
                 <form
-                  className="form nested-form"
-                  onSubmit={(event) => {
+                  className="form nested-form compact-form"
+                  onSubmit={async (event) => {
                     event.preventDefault();
-                    void onCreateReport({
+                    if (isBusy) {
+                      return;
+                    }
+                    const assignmentReportText = blackBoxText(assignment.id);
+                    const normalizedAssignmentReportText = assignmentReportText.trim();
+                    if (!normalizedAssignmentReportText) {
+                      return;
+                    }
+                    const assignmentAttachment = blackBoxAttachment(assignment.id);
+                    const success = await onCreateReport({
                       moduleId: assignment.moduleId,
                       blackBoxAssignmentId: assignment.id,
                       type: "BLACK_BOX",
                       title: "Black box отчет по SQL Injection",
-                      contentMarkdown: blackBoxReportText,
-                      attachment: blackBoxReportAttachment
+                      contentMarkdown: normalizedAssignmentReportText,
+                      attachment: assignmentAttachment
                     });
+                    if (success) {
+                      clearBlackBoxDraft(assignment.id);
+                    }
                   }}
                 >
                   <label htmlFor={`blackBoxReport-${assignment.id}`}>Black box evidence</label>
                   <textarea
                     id={`blackBoxReport-${assignment.id}`}
-                    rows={5}
-                    value={blackBoxReportText}
-                    onChange={(event) => setBlackBoxReportText(event.target.value)}
+                    rows={4}
+                    disabled={isBusy}
+                    maxLength={REPORT_MARKDOWN_MAX_LENGTH}
+                    value={blackBoxText(assignment.id)}
+                    onChange={(event) =>
+                      setBlackBoxReportTexts((current) => ({
+                        ...current,
+                        [assignment.id]: event.target.value
+                      }))
+                    }
                   />
+                  <p className="muted field-hint">
+                    {blackBoxText(assignment.id).length}/{REPORT_MARKDOWN_MAX_LENGTH}
+                  </p>
                   <div className="preview-panel">
                     <strong>Preview black box отчета</strong>
-                    <MarkdownPreview source={blackBoxReportText} />
+                    <MarkdownPreview source={blackBoxText(assignment.id)} />
                   </div>
                   <label htmlFor={`blackBoxAttachment-${assignment.id}`}>Вложение с evidence (опционально)</label>
                   <input
+                    key={blackBoxAttachmentInputVersions[assignment.id] ?? 0}
                     id={`blackBoxAttachment-${assignment.id}`}
                     type="file"
-                    onChange={(event) => setBlackBoxReportAttachment(event.target.files?.[0] ?? null)}
+                    disabled={isBusy}
+                    onChange={(event) =>
+                      setBlackBoxReportAttachments((current) => ({
+                        ...current,
+                        [assignment.id]: event.target.files?.[0] ?? null
+                      }))
+                    }
                   />
-                  {blackBoxReportAttachment && (
+                  {blackBoxAttachment(assignment.id) && (
                     <p className="muted">
-                      Выбрано: {blackBoxReportAttachment.name} ({formatBytes(blackBoxReportAttachment.size)})
+                      Выбрано: {blackBoxAttachment(assignment.id)!.name} ({formatBytes(blackBoxAttachment(assignment.id)!.size)})
                     </p>
                   )}
-                  <button type="submit">Отправить black box отчет</button>
+                  <button type="submit" disabled={isBusy || !hasBlackBoxContent(assignment.id)}>
+                    Отправить black box отчет
+                  </button>
                 </form>
               )}
             </>
           )}
         />
-      </article>
+      </article>}
+      </div>
     </section>
   );
 }
+
+type CuratorSectionId = "validation" | "reports";
 
 function CuratorDashboard({
   firstModule,
   submissions,
   validationJobs,
   reports,
+  isBusy,
   onExportGrades,
   onCompleteValidation,
   onCreateReview
@@ -1334,6 +2279,7 @@ function CuratorDashboard({
   submissions: Submission[];
   validationJobs: ValidationJob[];
   reports: Report[];
+  isBusy: boolean;
   onExportGrades: (moduleId: string) => Promise<void>;
   onCompleteValidation: (jobId: string, passed: boolean) => Promise<void>;
   onCreateReview: (payload: {
@@ -1346,6 +2292,7 @@ function CuratorDashboard({
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [typeFilter, setTypeFilter] = useState<ReportType | "ALL">("ALL");
   const [authorFilter, setAuthorFilter] = useState("");
+  const [activeSection, setActiveSection] = useState<CuratorSectionId>("validation");
   const reportStatuses = useMemo(() => Array.from(new Set(reports.map((report) => report.status))).sort(), [reports]);
   const filteredReports = useMemo(
     () =>
@@ -1359,12 +2306,34 @@ function CuratorDashboard({
   );
 
   return (
-    <section className="grid">
-      <article className="card">
+    <section className="section-panel">
+      <nav className="section-nav" aria-label="Разделы куратора">
+        <button
+          type="button"
+          disabled={isBusy}
+          className={activeSection === "validation" ? "section-nav-button active" : "section-nav-button"}
+          onClick={() => setActiveSection("validation")}
+        >
+          Technical validation
+          <span className="badge-count">{validationJobs.length}</span>
+        </button>
+        <button
+          type="button"
+          disabled={isBusy}
+          className={activeSection === "reports" ? "section-nav-button active" : "section-nav-button"}
+          onClick={() => setActiveSection("reports")}
+        >
+          Очередь отчетов
+          <span className="badge-count">{filteredReports.length}</span>
+        </button>
+      </nav>
+      <div className="grid">
+      {activeSection === "validation" && <article className="card">
         <h2>Curator: technical validation</h2>
         <EntityList
           title="Validation jobs"
           items={validationJobs}
+          maxHeight={420}
           render={(job) => (
             <>
               <strong>{job.imageReference}</strong>
@@ -1372,23 +2341,23 @@ function CuratorDashboard({
               <ImageScanSummary job={job} />
               <DependencyScanSummary job={job} />
               <div className="actions">
-                <button type="button" onClick={() => void onCompleteValidation(job.id, true)}>
+                <button type="button" disabled={isBusy} onClick={() => void onCompleteValidation(job.id, true)}>
                   Отметить как пройдено
                 </button>
-                <button type="button" className="secondary" onClick={() => void onCompleteValidation(job.id, false)}>
+                <button type="button" className="secondary" disabled={isBusy} onClick={() => void onCompleteValidation(job.id, false)}>
                   Отметить ошибку
                 </button>
               </div>
             </>
           )}
         />
-      </article>
+      </article>}
 
-      <article className="card">
+      {activeSection === "reports" && <article className="card">
         <h2>Curator: проверка отчетов</h2>
         {firstModule && (
           <div className="actions">
-            <button type="button" className="secondary" onClick={() => void onExportGrades(firstModule.id)}>
+            <button type="button" className="secondary" disabled={isBusy} onClick={() => void onExportGrades(firstModule.id)}>
               Экспорт оценок CSV
             </button>
           </div>
@@ -1396,7 +2365,7 @@ function CuratorDashboard({
         <div className="filter-panel">
           <div>
             <label htmlFor="reportStatusFilter">Статус</label>
-            <select id="reportStatusFilter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <select id="reportStatusFilter" disabled={isBusy} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
               <option value="ALL">Все статусы</option>
               {reportStatuses.map((status) => (
                 <option key={status} value={status}>
@@ -1409,6 +2378,7 @@ function CuratorDashboard({
             <label htmlFor="reportTypeFilter">Тип отчета</label>
             <select
               id="reportTypeFilter"
+              disabled={isBusy}
               value={typeFilter}
               onChange={(event) => setTypeFilter(event.target.value as ReportType | "ALL")}
             >
@@ -1421,6 +2391,7 @@ function CuratorDashboard({
             <label htmlFor="reportAuthorFilter">Автор</label>
             <input
               id="reportAuthorFilter"
+              disabled={isBusy}
               placeholder="student@pep.local"
               value={authorFilter}
               onChange={(event) => setAuthorFilter(event.target.value)}
@@ -1433,17 +2404,19 @@ function CuratorDashboard({
         <EntityList
           title="Очередь отчетов"
           items={filteredReports}
+          maxHeight={560}
           render={(report) => (
             <ReviewForm
-              key={report.id}
               report={report}
               submissions={submissions}
               validationJobs={validationJobs}
+              isBusy={isBusy}
               onCreateReview={onCreateReview}
             />
           )}
         />
-      </article>
+      </article>}
+      </div>
     </section>
   );
 }
@@ -1452,11 +2425,13 @@ function ReviewForm({
   report,
   submissions,
   validationJobs,
+  isBusy,
   onCreateReview
 }: {
   report: Report;
   submissions: Submission[];
   validationJobs: ValidationJob[];
+  isBusy: boolean;
   onCreateReview: (payload: {
     reportId: string;
     decision: ReviewDecision;
@@ -1469,13 +2444,27 @@ function ReviewForm({
   const [comment, setComment] = useState("Уязвимость воспроизводится, evidence достаточно.");
   const submission = submissions.find((item) => item.id === report.submissionId);
   const validationJob = validationJobs.find((job) => job.submissionId === report.submissionId);
+  const normalizedComment = comment.trim();
+
+  function clampScore(nextScore: number) {
+    if (Number.isNaN(nextScore)) {
+      return 0;
+    }
+    return Math.min(100, Math.max(0, nextScore));
+  }
 
   return (
     <form
-      className="review-box"
+      className="review-box compact-form"
       onSubmit={(event) => {
         event.preventDefault();
-        void onCreateReview({ reportId: report.id, decision, score, commentMarkdown: comment });
+        if (isBusy) {
+          return;
+        }
+        if (!normalizedComment) {
+          return;
+        }
+        void onCreateReview({ reportId: report.id, decision, score: clampScore(score), commentMarkdown: normalizedComment });
       }}
     >
       <strong>{report.title}</strong>
@@ -1508,7 +2497,12 @@ function ReviewForm({
       <MarkdownPreview source={report.contentMarkdown} />
       <ReportAttachmentsList attachments={report.attachments} />
       <label htmlFor={`decision-${report.id}`}>Решение</label>
-      <select id={`decision-${report.id}`} value={decision} onChange={(event) => setDecision(event.target.value as ReviewDecision)}>
+      <select
+        id={`decision-${report.id}`}
+        disabled={isBusy}
+        value={decision}
+        onChange={(event) => setDecision(event.target.value as ReviewDecision)}
+      >
         <option value="APPROVED">Принять</option>
         <option value="NEEDS_REVISION">Вернуть на доработку</option>
         <option value="REJECTED">Отклонить</option>
@@ -1519,19 +2513,34 @@ function ReviewForm({
         type="number"
         min={0}
         max={100}
+        disabled={isBusy}
         value={score}
-        onChange={(event) => setScore(Number(event.target.value))}
+        onChange={(event) => setScore(clampScore(Number(event.target.value)))}
       />
       <label htmlFor={`comment-${report.id}`}>Комментарий</label>
-      <textarea id={`comment-${report.id}`} value={comment} onChange={(event) => setComment(event.target.value)} />
+      <textarea
+        id={`comment-${report.id}`}
+        rows={4}
+        disabled={isBusy}
+        maxLength={REVIEW_COMMENT_MAX_LENGTH}
+        value={comment}
+        onChange={(event) => setComment(event.target.value)}
+      />
+      <p className="muted field-hint">
+        {comment.length}/{REVIEW_COMMENT_MAX_LENGTH}
+      </p>
       <div className="preview-panel">
         <strong>Preview комментария</strong>
         <MarkdownPreview source={comment} />
       </div>
-      <button type="submit">Сохранить решение</button>
+      <button type="submit" disabled={isBusy || !normalizedComment}>
+        Сохранить решение
+      </button>
     </form>
   );
 }
+
+type AdminSectionId = "overview" | "content" | "users" | "labs" | "analytics" | "audit";
 
 function AdminDashboard({
   submissions,
@@ -1539,7 +2548,17 @@ function AdminDashboard({
   reports,
   labs,
   auditEvents,
+  courses,
+  users,
+  onlineUsers,
   firstModule,
+  isBusy,
+  onRefresh,
+  onCreateCourse,
+  onCreateModule,
+  onUpsertLesson,
+  onCreateUser,
+  onDisableUser,
   onExportGrades,
   onCreateLab,
   onDistribute
@@ -1549,11 +2568,22 @@ function AdminDashboard({
   reports: Report[];
   labs: Lab[];
   auditEvents: AuditEvent[];
+  courses: Course[];
+  users: AdminUser[];
+  onlineUsers?: OnlineUsers;
   firstModule?: LearningModule;
+  isBusy: boolean;
+  onRefresh: () => void;
+  onCreateCourse: (payload: { title: string; description: string }) => Promise<boolean>;
+  onCreateModule: (payload: { courseId: string; title: string; vulnerabilityTopic: string }) => Promise<boolean>;
+  onUpsertLesson: (payload: { moduleId: string; title: string; contentMarkdown: string; position: number }) => Promise<boolean>;
+  onCreateUser: (payload: { email: string; password: string; displayName: string; role: Role }) => Promise<boolean>;
+  onDisableUser: (userId: string) => Promise<boolean>;
   onExportGrades: (moduleId: string) => Promise<void>;
   onCreateLab: (submissionId: string) => Promise<void>;
   onDistribute: (moduleId: string) => Promise<void>;
 }) {
+  const [activeSection, setActiveSection] = useState<AdminSectionId>("overview");
   const approvedSubmissions = submissions.filter((submission) => submission.status === "APPROVED");
   const labBySubmissionId = useMemo(() => new Map(labs.map((lab) => [lab.submissionId, lab])), [labs]);
   const labSubmissionIds = new Set(labBySubmissionId.keys());
@@ -1566,186 +2596,573 @@ function AdminDashboard({
   const passedValidationJobs = validationJobs.filter((job) => job.status === "PASSED").length;
   const approvedReports = reports.filter((report) => report.status === "APPROVED").length;
 
+  const sections: Array<{ id: AdminSectionId; label: string; count?: number }> = [
+    { id: "overview", label: "Обзор" },
+    { id: "content", label: "Курсы", count: courses.reduce((sum, course) => sum + course.modules.length, 0) },
+    { id: "users", label: "Пользователи", count: users.length },
+    { id: "labs", label: "Lab runtime", count: labs.length },
+    { id: "analytics", label: "Аналитика" },
+    { id: "audit", label: "Аудит", count: auditEvents.length }
+  ];
+
   return (
-    <section className="grid">
-      <article className="card">
-        <h2>Admin: состояние MVP</h2>
-        <dl className="metrics">
-          <div>
-            <dt>Submissions</dt>
-            <dd>{submissions.length}</dd>
-          </div>
-          <div>
-            <dt>Validation jobs</dt>
-            <dd>{validationJobs.length}</dd>
-          </div>
-          <div>
-            <dt>Reports</dt>
-            <dd>{reports.length}</dd>
-          </div>
-          <div>
-            <dt>Labs</dt>
-            <dd>{labs.length}</dd>
-          </div>
-        </dl>
-      </article>
+    <section className="section-panel">
+      <nav className="section-nav" aria-label="Разделы администратора">
+        {sections.map((section) => (
+          <button
+            key={section.id}
+            type="button"
+            disabled={isBusy}
+            className={section.id === activeSection ? "section-nav-button active" : "section-nav-button"}
+            onClick={() => setActiveSection(section.id)}
+          >
+            {section.label}
+            {typeof section.count === "number" && <span className="badge-count">{section.count}</span>}
+          </button>
+        ))}
+      </nav>
 
-      <article className="card wide">
-        <h2>Admin: состояние lab runtime</h2>
-        <dl className="metrics module-result">
-          <div>
-            <dt>Готовы к lab</dt>
-            <dd>{approvedSubmissions.length}</dd>
-          </div>
-          <div>
-            <dt>Без lab</dt>
-            <dd>{pendingLabSubmissions.length}</dd>
-          </div>
-          <div>
-            <dt>Running labs</dt>
-            <dd>{runningLabs.length}</dd>
-          </div>
-          <div>
-            <dt>Статусы</dt>
-            <dd>{Object.keys(labStatusCounts).length || "-"}</dd>
-          </div>
-        </dl>
-        <div className="lab-status-grid">
-          <div className="feedback-box">
-            <strong>Lab readiness</strong>
-            <p className="muted">Approved submissions должны получить lab instance перед black box distribution.</p>
-            {pendingLabSubmissions.length === 0 ? (
-              <StatusBadge value="COMPLETED" />
-            ) : (
-              <p className="error-text">Ожидают lab: {pendingLabSubmissions.length}</p>
-            )}
-          </div>
-          <div className="feedback-box">
-            <strong>Lab statuses</strong>
-            {Object.entries(labStatusCounts).length === 0 ? (
-              <p className="muted">Lab instances пока не созданы.</p>
-            ) : (
-              <ul className="compact-list">
-                {Object.entries(labStatusCounts).map(([status, count]) => (
-                  <li key={status}>
-                    <StatusBadge value={status} /> {count}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+      {activeSection === "overview" && (
+        <div className="section-panel">
+          <header className="section-panel-header">
+            <div>
+              <h2>Состояние платформы</h2>
+            </div>
+          </header>
+          <article className="card">
+            <h2>Ключевые метрики</h2>
+            <dl className="metrics">
+              <div>
+                <dt>Online users</dt>
+                <dd>{onlineUsers?.activeUsers ?? 0}</dd>
+              </div>
+              <div>
+                <dt>Active sessions</dt>
+                <dd>{onlineUsers?.activeSessions ?? 0}</dd>
+              </div>
+              <div>
+                <dt>Submissions</dt>
+                <dd>{submissions.length}</dd>
+              </div>
+              <div>
+                <dt>Validation jobs</dt>
+                <dd>{validationJobs.length}</dd>
+              </div>
+              <div>
+                <dt>Reports</dt>
+                <dd>{reports.length}</dd>
+              </div>
+              <div>
+                <dt>Labs</dt>
+                <dd>{labs.length}</dd>
+              </div>
+            </dl>
+            <div className="actions">
+              <button type="button" className="secondary" disabled={isBusy} onClick={onRefresh}>
+                Обновить статистику
+              </button>
+            </div>
+          </article>
+          <article className="card">
+            <h2>Готовность lab runtime</h2>
+            <dl className="metrics module-result">
+              <div>
+                <dt>Готовы к lab</dt>
+                <dd>{approvedSubmissions.length}</dd>
+              </div>
+              <div>
+                <dt>Без lab</dt>
+                <dd>{pendingLabSubmissions.length}</dd>
+              </div>
+              <div>
+                <dt>Running labs</dt>
+                <dd>{runningLabs.length}</dd>
+              </div>
+              <div>
+                <dt>Статусы</dt>
+                <dd>{Object.keys(labStatusCounts).length || "-"}</dd>
+              </div>
+            </dl>
+            <div className="lab-status-grid">
+              <div className="feedback-box">
+                <strong>Lab readiness</strong>
+                <p className="muted">Approved submissions должны получить lab instance перед black box distribution.</p>
+                {pendingLabSubmissions.length === 0 ? (
+                  <StatusBadge value="COMPLETED" />
+                ) : (
+                  <p className="error-text">Ожидают lab: {pendingLabSubmissions.length}</p>
+                )}
+              </div>
+              <div className="feedback-box">
+                <strong>Lab statuses</strong>
+                {Object.entries(labStatusCounts).length === 0 ? (
+                  <p className="muted">Lab instances пока не созданы.</p>
+                ) : (
+                  <ul className="compact-list">
+                    {Object.entries(labStatusCounts).map(([status, count]) => (
+                      <li key={status}>
+                        <StatusBadge value={status} /> {count}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </article>
         </div>
-      </article>
+      )}
 
-      <article className="card wide">
-        <h2>Progress analytics</h2>
-        <div className="chart-grid">
-          <ProgressBar label="Technical validation passed" value={passedValidationJobs} total={validationJobs.length} />
-          <ProgressBar label="Approved reports" value={approvedReports} total={reports.length} />
-          <ProgressBar label="Labs created" value={labs.length} total={approvedSubmissions.length} />
-          <StatusDistribution title="Validation jobs по статусам" counts={countByStatus(validationJobs)} />
-          <StatusDistribution title="Labs по статусам" counts={labStatusCounts} />
-        </div>
-      </article>
+      {activeSection === "content" && (
+        <AdminContentManager
+          courses={courses}
+          isBusy={isBusy}
+          onCreateCourse={onCreateCourse}
+          onCreateModule={onCreateModule}
+          onUpsertLesson={onUpsertLesson}
+        />
+      )}
 
-      <article className="card">
-        <h2>Admin: lab runtime</h2>
-        <EntityList
-          title="Принятые submissions"
-          items={approvedSubmissions}
-          render={(submission) => (
-            <>
-              <strong>{submission.imageReference}</strong>
-              <p className="muted">{submission.studentEmail}</p>
-              {labSubmissionIds.has(submission.id) ? (
-                <>
-                  <StatusBadge value={labBySubmissionId.get(submission.id)!.status} />
-                  <p className="muted">Namespace: {labBySubmissionId.get(submission.id)!.namespace}</p>
-                </>
-              ) : (
-                <button type="button" onClick={() => void onCreateLab(submission.id)}>
-                  Создать lab instance
+      {activeSection === "users" && (
+        <AdminUsersManager
+          users={users}
+          isBusy={isBusy}
+          onCreateUser={onCreateUser}
+          onDisableUser={onDisableUser}
+        />
+      )}
+
+      {activeSection === "labs" && (
+        <div className="section-panel">
+          <header className="section-panel-header">
+            <div>
+              <h2>Lab runtime</h2>
+            </div>
+            {firstModule && (
+              <div className="actions">
+                <button type="button" disabled={isBusy} onClick={() => void onDistribute(firstModule.id)}>
+                  Распределить black box цели
                 </button>
+                <button type="button" className="secondary" disabled={isBusy} onClick={() => void onExportGrades(firstModule.id)}>
+                  Экспорт оценок CSV
+                </button>
+              </div>
+            )}
+          </header>
+          <article className="card">
+            <h2>Принятые submissions</h2>
+            <EntityList
+              title="Готовы к созданию lab"
+              items={approvedSubmissions}
+              maxHeight={360}
+              render={(submission) => (
+                <>
+                  <strong>{submission.imageReference}</strong>
+                  <p className="muted">{submission.studentEmail}</p>
+                  {labSubmissionIds.has(submission.id) ? (
+                    <>
+                      <StatusBadge value={labBySubmissionId.get(submission.id)!.status} />
+                      <p className="muted">Namespace: {labBySubmissionId.get(submission.id)!.namespace}</p>
+                    </>
+                  ) : (
+                    <button type="button" disabled={isBusy} onClick={() => void onCreateLab(submission.id)}>
+                      Создать lab instance
+                    </button>
+                  )}
+                </>
               )}
-            </>
-          )}
-        />
-        <EntityList
-          title="Lab instances"
-          items={labs}
-          render={(lab) => (
-            <>
-              <strong>{lab.routeUrl}</strong>
-              <StatusBadge value={lab.status} />
-              <p className="muted">Student: {lab.studentEmail}</p>
-              <p className="muted">Image: {lab.imageReference}</p>
-              <p className="muted">Ingress URL:</p>
-              <code>{lab.ingressUrl}</code>
-              <p className="muted">
-                {lab.namespace} / {lab.serviceName}
-              </p>
-              <p className="muted">Expires: {new Date(lab.expiresAt).toLocaleString("ru-RU")}</p>
-              <p className="muted">Install ingress controller:</p>
-              <code>{lab.ingressInstallCommand}</code>
-              <p className="muted">Deploy в kind:</p>
-              <code>{lab.deployCommand}</code>
-              <p className="muted">Port-forward:</p>
-              <code>{lab.portForwardCommand}</code>
-            </>
-          )}
-        />
-        {firstModule ? (
-          <div className="actions">
-            <button type="button" onClick={() => void onDistribute(firstModule.id)}>
-              Распределить black box цели
-            </button>
-            <button type="button" className="secondary" onClick={() => void onExportGrades(firstModule.id)}>
-              Экспорт оценок CSV
-            </button>
-          </div>
-        ) : (
-          <EmptyState>Нет активного модуля для распределения.</EmptyState>
-        )}
+            />
+          </article>
+          <article className="card">
+            <h2>Lab instances</h2>
+            <EntityList
+              title="Запущенные окружения"
+              items={labs}
+              maxHeight={520}
+              render={(lab) => (
+                <>
+                  <strong>{lab.routeUrl}</strong>
+                  <StatusBadge value={lab.status} />
+                  <p className="muted">Student: {lab.studentEmail}</p>
+                  <p className="muted">Image: {lab.imageReference}</p>
+                  <p className="muted">Ingress URL:</p>
+                  <code>{lab.ingressUrl}</code>
+                  <p className="muted">
+                    {lab.namespace} / {lab.serviceName}
+                  </p>
+                  <p className="muted">Expires: {new Date(lab.expiresAt).toLocaleString("ru-RU")}</p>
+                  <p className="muted">Install ingress controller:</p>
+                  <code>{lab.ingressInstallCommand}</code>
+                  <p className="muted">Deploy в kind:</p>
+                  <code>{lab.deployCommand}</code>
+                  <p className="muted">Port-forward:</p>
+                  <code>{lab.portForwardCommand}</code>
+                </>
+              )}
+            />
+          </article>
+        </div>
+      )}
+
+      {activeSection === "analytics" && (
+        <div className="section-panel">
+          <header className="section-panel-header">
+            <div>
+              <h2>Аналитика прогресса</h2>
+            </div>
+          </header>
+          <article className="card">
+            <h2>Сводные графики</h2>
+            <div className="chart-grid">
+              <ProgressBar label="Technical validation passed" value={passedValidationJobs} total={validationJobs.length} />
+              <ProgressBar label="Approved reports" value={approvedReports} total={reports.length} />
+              <ProgressBar label="Labs created" value={labs.length} total={approvedSubmissions.length} />
+              <StatusDistribution title="Validation jobs по статусам" counts={countByStatus(validationJobs)} />
+              <StatusDistribution title="Labs по статусам" counts={labStatusCounts} />
+            </div>
+          </article>
+        </div>
+      )}
+
+      {activeSection === "audit" && (
+        <div className="section-panel">
+          <header className="section-panel-header">
+            <div>
+              <h2>Audit trail</h2>
+            </div>
+          </header>
+          <article className="card">
+            <h2>События</h2>
+            <EntityList
+              title="Последние события"
+              items={auditEvents}
+              maxHeight={480}
+              render={(event) => (
+                <div className="audit-row">
+                  <time>{new Date(event.createdAt).toLocaleString("ru-RU")}</time>
+                  <strong>{event.action}</strong>
+                  <span>{event.actorEmail ?? "system"} - {event.targetType}</span>
+                  <code>{event.metadataJson}</code>
+                </div>
+              )}
+            />
+          </article>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AdminContentManager({
+  courses,
+  isBusy,
+  onCreateCourse,
+  onCreateModule,
+  onUpsertLesson
+}: {
+  courses: Course[];
+  isBusy: boolean;
+  onCreateCourse: (payload: { title: string; description: string }) => Promise<boolean>;
+  onCreateModule: (payload: { courseId: string; title: string; vulnerabilityTopic: string }) => Promise<boolean>;
+  onUpsertLesson: (payload: { moduleId: string; title: string; contentMarkdown: string; position: number }) => Promise<boolean>;
+}) {
+  const firstCourseId = courses[0]?.id ?? "";
+  const firstModuleId = courses.flatMap((course) => course.modules)[0]?.id ?? "";
+  const [courseTitle, setCourseTitle] = useState("");
+  const [courseDescription, setCourseDescription] = useState("");
+  const [moduleCourseId, setModuleCourseId] = useState(firstCourseId);
+  const [moduleTitle, setModuleTitle] = useState("");
+  const [moduleTopic, setModuleTopic] = useState("");
+  const [lessonModuleId, setLessonModuleId] = useState(firstModuleId);
+  const [lessonTitle, setLessonTitle] = useState("");
+  const [lessonPosition, setLessonPosition] = useState(1);
+  const [lessonMarkdown, setLessonMarkdown] = useState("## Новый раздел\n\nТекст материала в формате Markdown.");
+
+  useEffect(() => {
+    if (!moduleCourseId && firstCourseId) {
+      setModuleCourseId(firstCourseId);
+    }
+    if (!lessonModuleId && firstModuleId) {
+      setLessonModuleId(firstModuleId);
+    }
+  }, [firstCourseId, firstModuleId, lessonModuleId, moduleCourseId]);
+
+  return (
+    <div className="grid">
+      <article className="card">
+        <h2>Создать курс</h2>
+        <form
+          className="form compact-form"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const success = await onCreateCourse({ title: courseTitle.trim(), description: courseDescription.trim() });
+            if (success) {
+              setCourseTitle("");
+              setCourseDescription("");
+            }
+          }}
+        >
+          <label htmlFor="adminCourseTitle">Название курса</label>
+          <input id="adminCourseTitle" disabled={isBusy} value={courseTitle} onChange={(event) => setCourseTitle(event.target.value)} />
+          <label htmlFor="adminCourseDescription">Описание курса</label>
+          <MarkdownAdminTextarea
+            id="adminCourseDescription"
+            rows={5}
+            disabled={isBusy}
+            value={courseDescription}
+            onChange={setCourseDescription}
+          />
+          <button type="submit" disabled={isBusy || !courseTitle.trim() || !courseDescription.trim()}>
+            Сохранить курс
+          </button>
+        </form>
       </article>
 
       <article className="card">
-        <h2>Admin: audit trail</h2>
+        <h2>Создать модуль</h2>
+        <form
+          className="form compact-form"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const success = await onCreateModule({
+              courseId: moduleCourseId,
+              title: moduleTitle.trim(),
+              vulnerabilityTopic: moduleTopic.trim()
+            });
+            if (success) {
+              setModuleTitle("");
+              setModuleTopic("");
+            }
+          }}
+        >
+          <label htmlFor="adminModuleCourse">Курс</label>
+          <select id="adminModuleCourse" disabled={isBusy} value={moduleCourseId} onChange={(event) => setModuleCourseId(event.target.value)}>
+            {courses.map((course) => (
+              <option key={course.id} value={course.id}>
+                {course.title}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="adminModuleTitle">Название модуля</label>
+          <input id="adminModuleTitle" disabled={isBusy} value={moduleTitle} onChange={(event) => setModuleTitle(event.target.value)} />
+          <label htmlFor="adminModuleTopic">Тема</label>
+          <input id="adminModuleTopic" disabled={isBusy} value={moduleTopic} onChange={(event) => setModuleTopic(event.target.value)} />
+          <button type="submit" disabled={isBusy || !moduleCourseId || !moduleTitle.trim() || !moduleTopic.trim()}>
+            Сохранить модуль
+          </button>
+        </form>
+      </article>
+
+      <article className="card wide">
+        <h2>Редактор страницы модуля</h2>
+        <form
+          className="form compact-form"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            await onUpsertLesson({
+              moduleId: lessonModuleId,
+              title: lessonTitle.trim(),
+              contentMarkdown: lessonMarkdown,
+              position: lessonPosition
+            });
+          }}
+        >
+          <label htmlFor="adminLessonModule">Модуль</label>
+          <select id="adminLessonModule" disabled={isBusy} value={lessonModuleId} onChange={(event) => setLessonModuleId(event.target.value)}>
+            {courses.flatMap((course) =>
+              course.modules.map((module) => (
+                <option key={module.id} value={module.id}>
+                  {course.title}: {module.title}
+                </option>
+              ))
+            )}
+          </select>
+          <label htmlFor="adminLessonTitle">Заголовок страницы</label>
+          <input id="adminLessonTitle" disabled={isBusy} value={lessonTitle} onChange={(event) => setLessonTitle(event.target.value)} />
+          <label htmlFor="adminLessonPosition">Позиция</label>
+          <input
+            id="adminLessonPosition"
+            type="number"
+            min={1}
+            disabled={isBusy}
+            value={lessonPosition}
+            onChange={(event) => setLessonPosition(Math.max(1, Number(event.target.value) || 1))}
+          />
+          <label htmlFor="adminLessonMarkdown">Markdown-контент</label>
+          <MarkdownAdminTextarea
+            id="adminLessonMarkdown"
+            rows={14}
+            disabled={isBusy}
+            value={lessonMarkdown}
+            onChange={setLessonMarkdown}
+          />
+          <div className="preview-panel">
+            <strong>Предпросмотр</strong>
+            <MarkdownPreview source={lessonMarkdown} />
+          </div>
+          <button type="submit" disabled={isBusy || !lessonModuleId || !lessonTitle.trim() || !lessonMarkdown.trim()}>
+            Сохранить страницу
+          </button>
+        </form>
+      </article>
+    </div>
+  );
+}
+
+function MarkdownAdminTextarea({
+  id,
+  rows,
+  disabled,
+  value,
+  onChange
+}: {
+  id: string;
+  rows: number;
+  disabled: boolean;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <textarea
+      id={id}
+      rows={rows}
+      disabled={disabled}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      onPaste={(event) => {
+        const imageItem = Array.from(event.clipboardData.items).find((item) => item.type.startsWith("image/"));
+        const file = imageItem?.getAsFile();
+        if (!file) {
+          return;
+        }
+        event.preventDefault();
+        const start = event.currentTarget.selectionStart;
+        const end = event.currentTarget.selectionEnd;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const text = String(reader.result ?? "");
+          onChange(`${value.slice(0, start)}${text}${value.slice(end)}`);
+        };
+        reader.readAsDataURL(file);
+      }}
+    />
+  );
+}
+
+function AdminUsersManager({
+  users,
+  isBusy,
+  onCreateUser,
+  onDisableUser
+}: {
+  users: AdminUser[];
+  isBusy: boolean;
+  onCreateUser: (payload: { email: string; password: string; displayName: string; role: Role }) => Promise<boolean>;
+  onDisableUser: (userId: string) => Promise<boolean>;
+}) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [role, setRole] = useState<Role>("STUDENT");
+
+  return (
+    <div className="grid">
+      <article className="card">
+        <h2>Создать пользователя</h2>
+        <form
+          className="form compact-form"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const success = await onCreateUser({
+              email: email.trim(),
+              password,
+              displayName: displayName.trim(),
+              role
+            });
+            if (success) {
+              setEmail("");
+              setPassword("");
+              setDisplayName("");
+              setRole("STUDENT");
+            }
+          }}
+        >
+          <label htmlFor="adminUserEmail">Email</label>
+          <input id="adminUserEmail" type="email" disabled={isBusy} value={email} onChange={(event) => setEmail(event.target.value)} />
+          <label htmlFor="adminUserName">Имя</label>
+          <input id="adminUserName" disabled={isBusy} value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          <label htmlFor="adminUserPassword">Пароль</label>
+          <input id="adminUserPassword" type="password" disabled={isBusy} value={password} onChange={(event) => setPassword(event.target.value)} />
+          <label htmlFor="adminUserRole">Роль</label>
+          <select id="adminUserRole" disabled={isBusy} value={role} onChange={(event) => setRole(event.target.value as Role)}>
+            <option value="STUDENT">Студент</option>
+            <option value="CURATOR">Куратор</option>
+            <option value="ADMIN">Администратор</option>
+          </select>
+          <button type="submit" disabled={isBusy || !email.trim() || !password || !displayName.trim()}>
+            Создать пользователя
+          </button>
+        </form>
+      </article>
+
+      <article className="card">
+        <h2>Все пользователи</h2>
         <EntityList
-          title="Последние события"
-          items={auditEvents}
-          render={(event) => (
+          title="Пользователи"
+          items={users}
+          maxHeight={520}
+          render={(user) => (
             <>
-              <strong>{event.action}</strong>
-              <p className="muted">
-                {event.actorEmail ?? "system"} - {event.targetType}
+              <strong>{user.displayName}</strong>
+              <p className="muted mono-wrap">{user.email}</p>
+              <p>
+                <StatusBadge value={roleLabels[user.role]} /> <StatusBadge value={user.status} />
               </p>
-              <code>{event.metadataJson}</code>
+              <button type="button" className="secondary" disabled={isBusy || user.status !== "ACTIVE"} onClick={() => void onDisableUser(user.id)}>
+                Отключить
+              </button>
             </>
           )}
         />
       </article>
-    </section>
+    </div>
   );
 }
 
 function EntityList<T>({
   title,
   items,
-  render
+  render,
+  getKey,
+  maxHeight
 }: {
   title: string;
   items: T[];
   render: (item: T) => React.ReactNode;
+  getKey?: (item: T, index: number) => string;
+  maxHeight?: number;
 }) {
+  function resolveItemKey(item: T, index: number) {
+    if (getKey) {
+      return getKey(item, index);
+    }
+    if (typeof item === "object" && item !== null && "id" in item) {
+      const itemId = (item as { id?: unknown }).id;
+      if (typeof itemId === "string" || typeof itemId === "number") {
+        return String(itemId);
+      }
+    }
+    return String(index);
+  }
+
   return (
     <div className="list-block">
       <h3>{title}</h3>
       {items.length === 0 ? (
         <EmptyState>Нет данных для отображения.</EmptyState>
       ) : (
-        <ul className="entity-list">
+        <ul className={maxHeight ? "entity-list scrollable" : "entity-list"} style={maxHeight ? { maxHeight } : undefined}>
           {items.map((item, index) => (
-            <li key={index}>{render(item)}</li>
+            <li key={resolveItemKey(item, index)}>{render(item)}</li>
           ))}
         </ul>
       )}

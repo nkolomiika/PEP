@@ -89,4 +89,11 @@ public class Lesson {
     public Boolean getPublished() {
         return published;
     }
+
+    public void updateContent(String title, String contentMarkdown, Integer position) {
+        this.title = title;
+        this.contentMarkdown = contentMarkdown;
+        this.position = position;
+        this.published = true;
+    }
 }

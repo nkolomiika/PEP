@@ -94,6 +94,11 @@ public class ValidationJob {
         this.startedAt = OffsetDateTime.now();
     }
 
+    public void useBuiltImage(String imageReference) {
+        this.imageReference = imageReference;
+        this.submission.markArchiveBuilt(imageReference);
+    }
+
     public void markStartingContainer() {
         this.status = ValidationJobStatus.STARTING_CONTAINER;
     }

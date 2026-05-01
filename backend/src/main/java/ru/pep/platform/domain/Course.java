@@ -69,6 +69,15 @@ public class Course {
         module.setCourse(this);
     }
 
+    public void updateDetails(String description, CourseStatus status) {
+        this.description = description;
+        this.status = status;
+    }
+
+    public void archive() {
+        this.status = CourseStatus.ARCHIVED;
+    }
+
     public UUID getId() {
         return id;
     }

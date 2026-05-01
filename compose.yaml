@@ -17,8 +17,12 @@ services:
       PEP_DATABASE_URL: jdbc:postgresql://postgres:5432/pep
       PEP_DATABASE_USERNAME: pep
       PEP_DATABASE_PASSWORD: pep
+      PEP_DEMO_DATA_ENABLED: "true"
       PEP_VALIDATION_WORKER_ENABLED: "true"
       PEP_VALIDATION_WORKER_HOST_ADDRESS: host.docker.internal
+      PEP_GITLAB_BASE_URL: http://gitlab
+      PEP_GITLAB_GROUP: pep-tasks
+      PEP_GITLAB_TOKEN: ${PEP_GITLAB_TOKEN:-}
     depends_on:
       - postgres
     ports:
@@ -34,6 +38,7 @@ services:
       - backend
     ports:
       - "5173:80"
+      - "5443:443"
 
   registry:
     image: registry:2
@@ -57,6 +62,27 @@ services:
     ports:
       - "18080:18080"
 
+  gitlab:
+    image: gitlab/gitlab-ce:17.10.7-ce.0
+    container_name: pep-local-gitlab
+    profiles:
+      - gitlab
+    hostname: gitlab
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://localhost:8929'
+        gitlab_rails['gitlab_shell_ssh_port'] = 2224
+    ports:
+      - "8929:8929"
+      - "2224:22"
+    volumes:
+      - pep-gitlab-config:/etc/gitlab
+      - pep-gitlab-logs:/var/log/gitlab
+      - pep-gitlab-data:/var/opt/gitlab
+
 volumes:
   pep-postgres:
   pep-kubeconfig:
+  pep-gitlab-config:
+  pep-gitlab-logs:
+  pep-gitlab-data:

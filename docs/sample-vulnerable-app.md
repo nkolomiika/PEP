@@ -49,7 +49,11 @@ password=anything
 
 ## Docker requirements
 
-Image должен:
+Студент может отправить либо готовый image reference, либо архив проекта. Архив должен содержать
+`Dockerfile` или `docker-compose.yml`; если используется compose, web-сервис можно указать в поле
+`composeService`.
+
+Стенд должен:
 
 - запускаться без интерактивного ввода;
 - слушать port `8080`;
@@ -70,9 +74,24 @@ Runtime reference внутри `kind`:
 pep-local-registry:5000/vulnerable-sqli-demo:latest
 ```
 
+Для archive flow платформа сама соберет image вида:
+
+```text
+localhost:5001/student-lab-<submissionId>:latest
+```
+
+После создания lab стенд открывается по основному локальному домену:
+
+```text
+http://lab-<submissionId-prefix>.127.0.0.1.nip.io:8088
+```
+
+Дополнительно UI показывает красивый вариант `http://lab-<submissionId-prefix>.local.host`; для него
+на Windows нужна hosts/DNS/proxy настройка.
+
 ## Acceptance criteria
 
-- Image проходит technical-only validation.
-- Приложение можно открыть через port-forward.
+- Image или загруженный archive flow проходят technical-only validation.
+- Приложение можно открыть через ingress domain или port-forward fallback.
 - Payload воспроизводим для white box и black box демонстрации.
 - README приложения объясняет endpoint, port и тестовые данные.

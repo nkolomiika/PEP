@@ -7,8 +7,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -17,10 +20,12 @@ import ru.pep.platform.domain.AppUser;
 import ru.pep.platform.domain.BlackBoxAssignment;
 import ru.pep.platform.domain.LabInstance;
 import ru.pep.platform.domain.Course;
+import ru.pep.platform.domain.CourseStatus;
 import ru.pep.platform.domain.LearningModule;
 import ru.pep.platform.domain.Lesson;
 import ru.pep.platform.domain.LessonProgress;
 import ru.pep.platform.domain.LabStatus;
+import ru.pep.platform.domain.ModuleStatus;
 import ru.pep.platform.domain.Report;
 import ru.pep.platform.domain.ReportAttachment;
 import ru.pep.platform.domain.Review;
@@ -28,9 +33,13 @@ import ru.pep.platform.domain.ReportType;
 import ru.pep.platform.domain.Role;
 import ru.pep.platform.domain.ReviewDecision;
 import ru.pep.platform.domain.Submission;
+import ru.pep.platform.domain.SubmissionSourceType;
 import ru.pep.platform.domain.SubmissionStatus;
+import ru.pep.platform.domain.UserStatus;
 import ru.pep.platform.domain.ValidationJob;
+import ru.pep.platform.domain.ValidationJobStatus;
 import ru.pep.platform.repository.AppUserRepository;
+import ru.pep.platform.repository.AuthSessionRepository;
 import ru.pep.platform.repository.BlackBoxAssignmentRepository;
 import ru.pep.platform.repository.CourseRepository;
 import ru.pep.platform.repository.LabInstanceRepository;
@@ -47,8 +56,26 @@ import ru.pep.platform.repository.ValidationJobRepository;
 public class CorePlatformService {
 
     private static final int MAX_BLACK_BOX_TARGETS_PER_STUDENT = 3;
+    private static final Set<String> ALLOWED_ATTACHMENT_EXTENSIONS = Set.of(
+            ".txt",
+            ".md",
+            ".pdf",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp");
+    private static final Set<String> ALLOWED_ATTACHMENT_CONTENT_TYPES = Set.of(
+            "text/plain",
+            "text/markdown",
+            "application/pdf",
+            "image/png",
+            "image/jpeg",
+            "image/webp");
+    private static final Set<String> ALLOWED_ARCHIVE_EXTENSIONS = Set.of(".zip", ".tar", ".tar.gz", ".tgz");
+    private static final long MAX_ARCHIVE_SIZE_BYTES = 50L * 1024L * 1024L;
 
     private final AppUserRepository users;
+    private final AuthSessionRepository authSessions;
     private final CourseRepository courses;
     private final LearningModuleRepository modules;
     private final SubmissionRepository submissions;
@@ -61,10 +88,13 @@ public class CorePlatformService {
     private final LessonProgressRepository lessonProgress;
     private final ReportAttachmentRepository reportAttachments;
     private final AuditService audit;
+    private final PasswordEncoder passwordEncoder;
     private final Path attachmentStorageDirectory;
+    private final Path archiveStorageDirectory;
 
     public CorePlatformService(
             AppUserRepository users,
+            AuthSessionRepository authSessions,
             CourseRepository courses,
             LearningModuleRepository modules,
             SubmissionRepository submissions,
@@ -77,8 +107,11 @@ public class CorePlatformService {
             LessonProgressRepository lessonProgress,
             ReportAttachmentRepository reportAttachments,
             AuditService audit,
-            @Value("${pep.attachments.storage-dir:var/report-attachments}") String attachmentStorageDirectory) {
+            PasswordEncoder passwordEncoder,
+            @Value("${pep.attachments.storage-dir:var/report-attachments}") String attachmentStorageDirectory,
+            @Value("${pep.submissions.archive-storage-dir:var/submission-archives}") String archiveStorageDirectory) {
         this.users = users;
+        this.authSessions = authSessions;
         this.courses = courses;
         this.modules = modules;
         this.submissions = submissions;
@@ -91,12 +124,116 @@ public class CorePlatformService {
         this.lessonProgress = lessonProgress;
         this.reportAttachments = reportAttachments;
         this.audit = audit;
+        this.passwordEncoder = passwordEncoder;
         this.attachmentStorageDirectory = Path.of(attachmentStorageDirectory).toAbsolutePath().normalize();
+        this.archiveStorageDirectory = Path.of(archiveStorageDirectory).toAbsolutePath().normalize();
     }
 
     @Transactional(readOnly = true)
     public List<CoreDtos.CourseResponse> listCourses() {
-        return courses.findAll().stream().map(this::toCourseResponse).toList();
+        return courses.findAll().stream()
+                .filter(course -> course.getStatus() == ru.pep.platform.domain.CourseStatus.PUBLISHED)
+                .map(this::toCourseResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public CoreDtos.CurrentUserResponse currentUserProfile(String email) {
+        AppUser user = currentUser(email);
+        return new CoreDtos.CurrentUserResponse(user.getEmail(), user.getDisplayName(), user.getRole());
+    }
+
+    @Transactional(readOnly = true)
+    public List<CoreDtos.AdminUserResponse> listUsers() {
+        return users.findAll().stream().map(this::toAdminUserResponse).toList();
+    }
+
+    @Transactional
+    public CoreDtos.AdminUserResponse createUser(CoreDtos.CreateUserRequest request) {
+        String email = request.email().trim().toLowerCase(Locale.ROOT);
+        if (users.existsByEmail(email)) {
+            throw new ValidationException("Пользователь с таким email уже существует");
+        }
+        AppUser user = users.save(new AppUser(
+                email,
+                passwordEncoder.encode(request.password()),
+                request.displayName().trim(),
+                request.role()));
+        audit.record(user, "ADMIN_USER_CREATED", "AppUser", user.getId(), "{}");
+        return toAdminUserResponse(user);
+    }
+
+    @Transactional
+    public void disableUser(UUID userId) {
+        AppUser user = users.findById(userId)
+                .orElseThrow(() -> new NotFoundException("Пользователь не найден"));
+        user.disable();
+        audit.record(user, "ADMIN_USER_DISABLED", "AppUser", user.getId(), "{}");
+    }
+
+    @Transactional(readOnly = true)
+    public CoreDtos.OnlineUsersResponse onlineUsers() {
+        OffsetDateTime now = OffsetDateTime.now();
+        return new CoreDtos.OnlineUsersResponse(
+                authSessions.countActiveUsers(now),
+                authSessions.countActiveSessions(now));
+    }
+
+    @Transactional
+    public CoreDtos.CourseResponse createCourse(CoreDtos.CreateCourseRequest request) {
+        Course course = courses.findByTitle(request.title().trim())
+                .map(existing -> {
+                    existing.updateDetails(request.description(), CourseStatus.PUBLISHED);
+                    return courses.save(existing);
+                })
+                .orElseGet(() -> courses.save(new Course(
+                        request.title().trim(),
+                        request.description(),
+                        CourseStatus.PUBLISHED)));
+        audit.record(null, "COURSE_UPSERTED", "Course", course.getId(), "{}");
+        return toCourseResponse(course);
+    }
+
+    @Transactional
+    public CoreDtos.ModuleResponse createModule(CoreDtos.CreateModuleRequest request) {
+        Course course = courses.findById(request.courseId())
+                .orElseThrow(() -> new NotFoundException("Курс не найден"));
+        LearningModule module = modules.findByCourseIdAndTitle(course.getId(), request.title().trim())
+                .map(existing -> {
+                    existing.updateDetails(request.title().trim(), request.vulnerabilityTopic().trim(), ModuleStatus.ACTIVE);
+                    return modules.save(existing);
+                })
+                .orElseGet(() -> modules.save(new LearningModule(
+                        course,
+                        request.title().trim(),
+                        request.vulnerabilityTopic().trim(),
+                        ModuleStatus.ACTIVE)));
+        audit.record(null, "MODULE_UPSERTED", "LearningModule", module.getId(), "{}");
+        return toModuleResponse(module);
+    }
+
+    @Transactional
+    public CoreDtos.LessonResponse upsertLesson(CoreDtos.UpsertLessonRequest request) {
+        LearningModule module = modules.findById(request.moduleId())
+                .orElseThrow(() -> new NotFoundException("Модуль не найден"));
+        Lesson lesson = lessons.findByModuleIdOrderByPositionAsc(module.getId()).stream()
+                .filter(item -> item.getPosition().equals(request.position()))
+                .findFirst()
+                .orElseGet(() -> lessons.save(new Lesson(module, request.title(), request.contentMarkdown(), request.position())));
+        lesson.updateContent(request.title(), request.contentMarkdown(), request.position());
+        lesson = lessons.save(lesson);
+        audit.record(null, "LESSON_UPSERTED", "Lesson", lesson.getId(), "{}");
+        return toLessonResponse(lesson);
+    }
+
+    @Transactional
+    public CoreDtos.LessonResponse updateLesson(UUID lessonId, CoreDtos.UpdateLessonRequest request) {
+        Lesson lesson = lessons.findById(lessonId)
+                .orElseThrow(() -> new NotFoundException("Урок не найден"));
+        lesson.updateContent(request.title(), request.contentMarkdown(), request.position());
+        lesson = lessons.save(lesson);
+        audit.record(null, "LESSON_UPDATED", "Lesson", lesson.getId(), "{}");
+        return toLessonResponse(lesson);
     }
 
     @Transactional(readOnly = true)
@@ -118,12 +255,7 @@ public class CorePlatformService {
         Lesson lesson = lessons.findById(lessonId)
                 .filter(Lesson::getPublished)
                 .orElseThrow(() -> new NotFoundException("Урок не найден"));
-        return new CoreDtos.LessonResponse(
-                lesson.getId(),
-                lesson.getModule().getId(),
-                lesson.getTitle(),
-                lesson.getContentMarkdown(),
-                lesson.getPosition());
+        return toLessonResponse(lesson);
     }
 
     @Transactional(readOnly = true)
@@ -174,6 +306,59 @@ public class CorePlatformService {
         return toSubmissionResponse(submission);
     }
 
+    @Transactional
+    public CoreDtos.SubmissionResponse createArchiveSubmission(
+            String email,
+            UUID moduleId,
+            Integer applicationPort,
+            String healthPath,
+            String composeService,
+            MultipartFile archive) {
+        AppUser student = currentUser(email);
+        if (student.getRole() != Role.STUDENT) {
+            throw new AccessDeniedException("Только студент может отправить стенд");
+        }
+        if (applicationPort == null || applicationPort < 1 || applicationPort > 65535) {
+            throw new ValidationException("Некорректный порт приложения");
+        }
+        if (archive == null || archive.isEmpty()) {
+            throw new ValidationException("Архив стенда не выбран");
+        }
+        if (archive.getSize() > MAX_ARCHIVE_SIZE_BYTES) {
+            throw new ValidationException("Архив стенда превышает лимит 50 MB");
+        }
+        LearningModule module = modules.findById(moduleId)
+                .orElseThrow(() -> new NotFoundException("Модуль не найден"));
+        String originalFilename = normalizeFilename(archive.getOriginalFilename());
+        String archiveExtension = archiveExtensionOf(originalFilename);
+        if (!ALLOWED_ARCHIVE_EXTENSIONS.contains(archiveExtension)) {
+            throw new ValidationException("Разрешены только архивы .zip, .tar, .tar.gz и .tgz");
+        }
+        String storedFilename = UUID.randomUUID() + archiveExtension;
+        Path destination = archiveStorageDirectory.resolve(storedFilename).normalize();
+        try {
+            Files.createDirectories(archiveStorageDirectory);
+            try (InputStream input = archive.getInputStream()) {
+                Files.copy(input, destination, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException exception) {
+            throw new StorageException("Не удалось сохранить архив стенда", exception);
+        }
+
+        Submission submission = submissions.save(Submission.archive(
+                module,
+                student,
+                originalFilename,
+                destination.toString(),
+                normalizeOptionalName(composeService),
+                applicationPort,
+                normalizeHealthPath(healthPath)));
+        ValidationJob job = validationJobs.save(new ValidationJob(submission));
+        audit.record(student, "SUBMISSION_ARCHIVE_UPLOADED", "Submission", submission.getId(),
+                "{\"validationJobId\":\"" + job.getId() + "\",\"archiveFilename\":\"" + jsonEscape(originalFilename) + "\"}");
+        return toSubmissionResponse(submission);
+    }
+
     @Transactional(readOnly = true)
     public List<CoreDtos.SubmissionResponse> listSubmissions(String email) {
         AppUser user = currentUser(email);
@@ -207,6 +392,9 @@ public class CorePlatformService {
         AppUser actor = currentUser(email);
         ValidationJob job = validationJobs.findById(id)
                 .orElseThrow(() -> new NotFoundException("Validation job не найден"));
+        if (job.getStatus() != ValidationJobStatus.QUEUED) {
+            throw new ValidationException("Validation job уже обрабатывается или завершен");
+        }
         if (request.passed()) {
             job.pass(request.logsUri());
             audit.record(actor, "VALIDATION_JOB_PASSED", "ValidationJob", job.getId(), "{}");
@@ -236,6 +424,7 @@ public class CorePlatformService {
                 throw new AccessDeniedException("Нет доступа к чужому black box заданию");
             }
         }
+        validateReportScope(request, module, submission, assignment);
         Report report = reports.save(new Report(
                 author,
                 module,
@@ -260,13 +449,15 @@ public class CorePlatformService {
         AppUser user = currentUser(email);
         Report report = reports.findById(reportId)
                 .orElseThrow(() -> new NotFoundException("Отчет не найден"));
-        assertCanReadReport(user, report);
+        assertCanUploadReportAttachment(user, report);
         if (file.isEmpty()) {
             throw new ValidationException("Файл вложения пустой");
         }
 
         String originalFilename = normalizeFilename(file.getOriginalFilename());
         String extension = extensionOf(originalFilename);
+        String contentType = normalizeContentType(file.getContentType());
+        validateAttachmentType(extension, contentType);
         String storedFilename = report.getId() + "-" + UUID.randomUUID() + extension;
         Path destination = attachmentStorageDirectory.resolve(storedFilename).normalize();
 
@@ -283,10 +474,31 @@ public class CorePlatformService {
                 report,
                 originalFilename,
                 destination.toString(),
-                normalizeContentType(file.getContentType()),
+                contentType,
                 file.getSize()));
         audit.record(user, "REPORT_ATTACHMENT_UPLOADED", "Report", report.getId(), "{\"attachmentId\":\"" + attachment.getId() + "\"}");
         return toReportAttachmentResponse(attachment);
+    }
+
+    @Transactional
+    public AttachmentDownload downloadReportAttachment(String email, UUID attachmentId) {
+        AppUser user = currentUser(email);
+        ReportAttachment attachment = reportAttachments.findById(attachmentId)
+                .orElseThrow(() -> new NotFoundException("Вложение не найдено"));
+        Report report = attachment.getReport();
+        assertCanReadReport(user, report);
+
+        Path storedPath = Path.of(attachment.getStoragePath()).toAbsolutePath().normalize();
+        if (!storedPath.startsWith(attachmentStorageDirectory) || !Files.isRegularFile(storedPath)) {
+            throw new NotFoundException("Файл вложения не найден");
+        }
+        audit.record(user, "REPORT_ATTACHMENT_DOWNLOADED", "ReportAttachment", attachment.getId(),
+                "{\"reportId\":\"" + report.getId() + "\"}");
+        return new AttachmentDownload(
+                storedPath,
+                attachment.getOriginalFilename(),
+                attachment.getContentType(),
+                attachment.getSizeBytes());
     }
 
     @Transactional
@@ -366,7 +578,8 @@ public class CorePlatformService {
                         "pep-lab-" + shortId(submission.getId()),
                         "lab-" + shortId(submission.getId()),
                         "svc-" + shortId(submission.getId()),
-                        "http://localhost:18080")));
+                        publicLabUrl(submission.getId()))));
+        submission.setLabUrls(publicLabUrl(submission.getId()), localHostLabUrl(submission.getId()));
         audit.record(actor, "LAB_CREATED", "LabInstance", lab.getId(), "{\"submissionId\":\"" + submission.getId() + "\"}");
         return toLabResponse(lab);
     }
@@ -453,6 +666,28 @@ public class CorePlatformService {
                 OffsetDateTime.now());
     }
 
+    private void validateReportScope(
+            CoreDtos.CreateReportRequest request,
+            LearningModule module,
+            Submission submission,
+            BlackBoxAssignment assignment) {
+        if (request.type() == ReportType.WHITE_BOX) {
+            if (submission == null || assignment != null) {
+                throw new ValidationException("White box отчет должен ссылаться только на свою отправку image");
+            }
+            if (!submission.getModule().getId().equals(module.getId())) {
+                throw new ValidationException("Модуль отчета не совпадает с модулем отправки");
+            }
+        } else if (request.type() == ReportType.BLACK_BOX) {
+            if (assignment == null || submission != null) {
+                throw new ValidationException("Black box отчет должен ссылаться только на назначенную цель");
+            }
+            if (!assignment.getModule().getId().equals(module.getId())) {
+                throw new ValidationException("Модуль отчета не совпадает с модулем black box задания");
+            }
+        }
+    }
+
     private AppUser currentUser(String email) {
         return users.findByEmail(email).orElseThrow(() -> new NotFoundException("Пользователь не найден"));
     }
@@ -469,6 +704,12 @@ public class CorePlatformService {
         }
     }
 
+    private void assertCanUploadReportAttachment(AppUser user, Report report) {
+        if (!report.getAuthor().getId().equals(user.getId())) {
+            throw new AccessDeniedException("Вложения может добавлять только автор отчета");
+        }
+    }
+
     private String normalizeHealthPath(String healthPath) {
         if (healthPath == null || healthPath.isBlank()) {
             return "/health";
@@ -481,20 +722,60 @@ public class CorePlatformService {
         return normalized.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
+    private String normalizeOptionalName(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim().replaceAll("[^A-Za-z0-9._-]", "-");
+        return normalized.length() > 120 ? normalized.substring(0, 120) : normalized;
+    }
+
+    private String archiveExtensionOf(String filename) {
+        String normalized = filename.toLowerCase(Locale.ROOT);
+        if (normalized.endsWith(".tar.gz")) {
+            return ".tar.gz";
+        }
+        if (normalized.endsWith(".tgz")) {
+            return ".tgz";
+        }
+        return extensionOf(normalized);
+    }
+
     private String extensionOf(String filename) {
         int extensionStart = filename.lastIndexOf('.');
         if (extensionStart < 0 || extensionStart == filename.length() - 1) {
             return "";
         }
-        return filename.substring(extensionStart);
+        return filename.substring(extensionStart).toLowerCase(Locale.ROOT);
     }
 
     private String normalizeContentType(String contentType) {
         return contentType == null || contentType.isBlank() ? "application/octet-stream" : contentType;
     }
 
+    private void validateAttachmentType(String extension, String contentType) {
+        if (!ALLOWED_ATTACHMENT_EXTENSIONS.contains(extension) || !ALLOWED_ATTACHMENT_CONTENT_TYPES.contains(contentType)) {
+            throw new ValidationException("Тип файла вложения не разрешен");
+        }
+    }
+
     private String shortId(UUID id) {
         return id.toString().substring(0, 8);
+    }
+
+    private String publicLabUrl(UUID submissionId) {
+        return "http://lab-" + shortId(submissionId) + ".127.0.0.1.nip.io:8088";
+    }
+
+    private String localHostLabUrl(UUID submissionId) {
+        return "http://lab-" + shortId(submissionId) + ".local.host";
+    }
+
+    private String jsonEscape(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private Integer bestScore(List<Review> moduleReviews, ReportType reportType) {
@@ -552,12 +833,34 @@ public class CorePlatformService {
                 course.getDescription(),
                 course.getStatus(),
                 course.getModules().stream()
-                        .map(module -> new CoreDtos.ModuleResponse(
-                                module.getId(),
-                                module.getTitle(),
-                                module.getVulnerabilityTopic(),
-                                module.getStatus()))
+                        .map(this::toModuleResponse)
                         .toList());
+    }
+
+    private CoreDtos.ModuleResponse toModuleResponse(LearningModule module) {
+        return new CoreDtos.ModuleResponse(
+                module.getId(),
+                module.getTitle(),
+                module.getVulnerabilityTopic(),
+                module.getStatus());
+    }
+
+    private CoreDtos.LessonResponse toLessonResponse(Lesson lesson) {
+        return new CoreDtos.LessonResponse(
+                lesson.getId(),
+                lesson.getModule().getId(),
+                lesson.getTitle(),
+                lesson.getContentMarkdown(),
+                lesson.getPosition());
+    }
+
+    private CoreDtos.AdminUserResponse toAdminUserResponse(AppUser user) {
+        return new CoreDtos.AdminUserResponse(
+                user.getId(),
+                user.getEmail(),
+                user.getDisplayName(),
+                user.getRole(),
+                user.getStatus());
     }
 
     private CoreDtos.SubmissionResponse toSubmissionResponse(Submission submission) {
@@ -566,6 +869,13 @@ public class CorePlatformService {
                 submission.getModule().getId(),
                 submission.getStudent().getEmail(),
                 submission.getImageReference(),
+                submission.getSourceType(),
+                submission.getArchiveFilename(),
+                submission.getComposeService(),
+                submission.getBuildContext(),
+                submission.getRuntimeImageReference(),
+                submission.getPublicUrl(),
+                submission.getLocalHostUrl(),
                 submission.getApplicationPort(),
                 submission.getHealthPath(),
                 submission.getStatus());
@@ -631,10 +941,9 @@ public class CorePlatformService {
 
     private CoreDtos.LabResponse toLabResponse(LabInstance lab) {
         Submission submission = lab.getSubmission();
-        String shortSubmissionId = shortId(submission.getId());
-        String ingressUrl = "http://lab-" + shortSubmissionId + ".127.0.0.1.nip.io:8088";
+        String ingressUrl = publicLabUrl(submission.getId());
         String deployCommand = "docker compose exec k8s-toolbox pep-lab-deploy "
-                + submission.getId() + " " + submission.getImageReference() + " " + submission.getApplicationPort();
+                + submission.getId() + " " + submission.getRuntimeImageReference() + " " + submission.getApplicationPort();
         String ingressInstallCommand = "docker compose exec k8s-toolbox pep-ingress-install";
         String portForwardCommand = "docker compose exec k8s-toolbox pep-lab-forward "
                 + submission.getId() + " " + submission.getApplicationPort() + " 18080";
@@ -643,6 +952,10 @@ public class CorePlatformService {
                 submission.getId(),
                 submission.getStudent().getEmail(),
                 submission.getImageReference(),
+                submission.getSourceType(),
+                submission.getRuntimeImageReference(),
+                publicLabUrl(submission.getId()),
+                localHostLabUrl(submission.getId()),
                 lab.getNamespace(),
                 lab.getDeploymentName(),
                 lab.getServiceName(),
@@ -661,8 +974,8 @@ public class CorePlatformService {
                 assignment.getId(),
                 assignment.getModule().getId(),
                 lab.getId(),
-                lab.getRouteUrl(),
-                lab.getSubmission().getImageReference(),
+                lab.getSubmission().getPublicUrl() == null ? lab.getRouteUrl() : lab.getSubmission().getPublicUrl(),
+                lab.getSubmission().getRuntimeImageReference(),
                 assignment.getStatus(),
                 assignment.getAssignedAt());
     }
@@ -689,5 +1002,8 @@ public class CorePlatformService {
         public StorageException(String message, Throwable cause) {
             super(message, cause);
         }
+    }
+
+    public record AttachmentDownload(Path path, String filename, String contentType, Long sizeBytes) {
     }
 }
