@@ -17,7 +17,8 @@ RUN case "${TARGETARCH}" in \
     && chmod +x /usr/local/bin/kubectl
 
 COPY scripts/ /usr/local/bin/
-RUN chmod +x /usr/local/bin/pep-kind-* /usr/local/bin/pep-lab-* /usr/local/bin/pep-ingress-*
+RUN sed -i 's/\r$//' /usr/local/bin/pep-kind-* /usr/local/bin/pep-lab-* /usr/local/bin/pep-ingress-* /usr/local/bin/pep-task-* \
+    && chmod +x /usr/local/bin/pep-kind-* /usr/local/bin/pep-lab-* /usr/local/bin/pep-ingress-* /usr/local/bin/pep-task-*
 
 WORKDIR /workspace
 

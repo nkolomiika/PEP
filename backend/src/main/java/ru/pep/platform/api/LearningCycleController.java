@@ -17,13 +17,14 @@ public class LearningCycleController {
     public LearningCycle learningCycle() {
         return new LearningCycle(
                 List.of(
-                        "Теория OWASP Top 10",
+                        "Теория Академии web-безопасности",
                         "Docker-подготовка",
-                        "Публикация Docker image",
+                        "Загрузка архива стенда или Docker image",
                         "Техническая проверка",
                         "White box отчет",
                         "Проверка куратора",
                         "Запуск lab в kind",
+                        "Запуск системного стенда",
                         "Black box распределение",
                         "Black box отчет",
                         "Итоговая оценка"),

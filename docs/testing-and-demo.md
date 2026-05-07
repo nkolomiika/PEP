@@ -78,20 +78,21 @@
 Подготовка:
 
 - создать admin, curator и двух student accounts;
-- создать курс OWASP Top 10;
+- создать курс Академии web-безопасности;
 - опубликовать Docker intro module;
-- опубликовать модуль `A03. Injection`;
+- опубликовать практические модули Академии;
 - подготовить один валидный vulnerable app image;
 - подготовить один невалидный image reference для демонстрации ошибки;
+- подготовить одну системную задачу для запуска стенда;
 - поднять containerized `kind` cluster через `k8s-toolbox`.
 - сверить готовность по `docs/demo-data-plan.md` и `docs/release-handoff-checklist.md`.
 
 Живая демонстрация:
 
 1. Администратор открывает dashboard и показывает курс.
-2. Студент открывает Docker intro lesson и отмечает прохождение.
-3. Студент открывает урок SQL Injection с примером уязвимого кода.
-4. Студент отправляет Docker image reference, port и white box отчет.
+2. Студент открывает Docker intro lesson.
+3. Студент открывает модуль SQL-инъекций с примером уязвимого кода.
+4. Студент отправляет архив стенда или Docker image reference, port и white box отчет.
 5. Worker создает validation job и проверяет image технически.
 6. Куратор проверяет и утверждает white box отчет.
 7. Платформа поднимает lab в `kind`.
@@ -99,7 +100,8 @@
 9. Второй студент открывает назначенный lab URL.
 10. Второй студент отправляет black box отчет с payload и evidence.
 11. Куратор проверяет и оценивает black box отчет.
-12. Администратор показывает audit events, lab status и resource limits.
+12. Студент запускает системный стенд из раздела `Стенды`.
+13. Администратор показывает audit events, lab status и resource limits.
 
 Подробный сценарий защиты и fallback описаны в `docs/defense-presentation.md`.
 Связь требований, API, тестов и demo steps описана в `docs/traceability-matrix.md`.

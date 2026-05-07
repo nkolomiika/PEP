@@ -66,6 +66,18 @@ docker compose exec k8s-toolbox kind version
 docker compose exec k8s-toolbox kubectl version --client
 ```
 
+## Системные пентест-стенды
+
+Стенды и задачи управляются внутри PEP и хранятся как системные архивы.
+Для локальной разработки достаточно запущенных `backend`, `registry`, `k8s-toolbox` и kind-кластера.
+
+PEP управляет системными задачами через админский раздел `Системные задачи`, собирает image в local registry и
+создает экземпляр стенда на 4 часа с URL вида:
+
+```text
+http://task-<slug>-<instance>.127.0.0.1.nip.io:8088
+```
+
 ## Создание kind cluster
 
 ```powershell

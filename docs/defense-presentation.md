@@ -14,14 +14,16 @@
 ## Demo script на 5-7 минут
 
 1. Открыть платформу и войти студентом.
-2. Показать курс Docker и модуль `A03. Injection`.
-3. Отправить submission с `localhost:5001/vulnerable-sqli-demo:latest`.
-4. Показать technical validation job.
-5. Отправить white box отчет с payload.
-6. Войти куратором и принять отчет.
-7. Войти администратором, показать lab runtime и запустить distribution.
-8. Войти вторым студентом, открыть black box assignment и отправить отчет.
-9. Показать review score и audit trail.
+2. Показать Docker-курс и Академию web-безопасности.
+3. Открыть модуль SQL-инъекций и показать подробный материал.
+4. Отправить archive submission или fallback image `localhost:5001/vulnerable-sqli-demo:latest`.
+5. Показать technical validation job.
+6. Отправить white box отчет с payload.
+7. Войти куратором и принять отчет.
+8. Войти администратором, показать lab runtime и запустить distribution.
+9. Показать раздел системных задач и официальный стенд на 4 часа.
+10. Войти вторым студентом, открыть black box assignment и отправить отчет.
+11. Показать review score и audit trail.
 
 ## Команды для демонстрации
 
@@ -40,8 +42,8 @@ docker compose exec k8s-toolbox kubectl port-forward --address 0.0.0.0 svc/<lab-
 **Почему kind через toolbox container?** `kind` запускает Kubernetes-ноды как Docker containers, а
 toolbox убирает требование устанавливать `kind` и `kubectl` на host.
 
-**Почему image reference, а не загрузка исходного кода?** Это снижает сложность MVP и фокусирует платформу
-на technical validation и lab runtime.
+**Почему архив стенда и fallback image reference?** Архив удобнее для студента и демонстрирует сборку
+платформой, а image reference оставлен как совместимый fallback.
 
 **Почему нет автоматического доказательства уязвимости?** Для защиты достаточно technical-only
 validation; доказательство уязвимости делает студент в отчете, а куратор проверяет результат.

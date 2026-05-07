@@ -1,0 +1,149 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$#" -lt 3 ]; then
+  echo "Usage: pep-task-deploy <namespace> <image-reference> <application-port> [dynamic-flag]" >&2
+  exit 1
+fi
+
+NAMESPACE="$1"
+IMAGE_REFERENCE="$2"
+APPLICATION_PORT="$3"
+DYNAMIC_FLAG="${4:-}"
+
+KUBECONFIG_PATH="${KUBECONFIG:-/kube/config}"
+
+if [ ! -s "${KUBECONFIG_PATH}" ]; then
+  echo "Локальный Kubernetes-кластер не найден. Запускаю автоматическую инициализацию (kind create cluster). Это занимает 1-2 минуты, дальнейшие запуски будут мгновенными." >&2
+  if ! pep-kind-create >&2; then
+    echo "PEP_TASK_DEPLOY_BOOTSTRAP_FAILED: не удалось поднять локальный кластер kind. Проверьте, что Docker Desktop запущен и доступен сокет /var/run/docker.sock." >&2
+    exit 2
+  fi
+  pep-ingress-install >&2 || echo "Внимание: pep-ingress-install завершился с ошибкой, ingress может быть недоступен." >&2
+fi
+
+# kubeconfig points at the kind-internal hostname (pep-local-control-plane); this hostname is
+# only resolvable on the docker `kind` network. After `docker compose up` the toolbox container
+# is recreated and loses its ad-hoc attachment, so we re-attach here. Idempotent.
+if ! getent hosts pep-local-control-plane >/dev/null 2>&1; then
+  if docker network inspect kind >/dev/null 2>&1; then
+    docker network connect kind pep-k8s-toolbox >/dev/null 2>&1 || true
+    docker network connect kind pep-local-registry >/dev/null 2>&1 || true
+  fi
+fi
+
+SAFE_ID="$(printf '%s' "${NAMESPACE}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | cut -c1-48)"
+HOST_ID="${SAFE_ID#pep-}"
+APP_NAME="app-${SAFE_ID}"
+SERVICE_NAME="svc-${SAFE_ID}"
+INGRESS_NAME="ing-${SAFE_ID}"
+INGRESS_HOST="${HOST_ID}.127.0.0.1.nip.io"
+
+RUNTIME_IMAGE="${IMAGE_REFERENCE}"
+case "${RUNTIME_IMAGE}" in
+  localhost:5001/*)
+    RUNTIME_IMAGE="pep-local-registry:5000/${RUNTIME_IMAGE#localhost:5001/}"
+    ;;
+esac
+
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${NAMESPACE}
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: task-quota
+  namespace: ${NAMESPACE}
+spec:
+  hard:
+    requests.cpu: "1"
+    requests.memory: 1Gi
+    limits.cpu: "2"
+    limits.memory: 2Gi
+    pods: "4"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${APP_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${APP_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${APP_NAME}
+        pep.dev/workload: pentest-task
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: ${RUNTIME_IMAGE}
+          ports:
+            - containerPort: ${APPLICATION_PORT}
+          env:
+            - name: PEP_DYNAMIC_FLAG
+              value: "${DYNAMIC_FLAG}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${SERVICE_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    app: ${APP_NAME}
+  ports:
+    - port: ${APPLICATION_PORT}
+      targetPort: ${APPLICATION_PORT}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${INGRESS_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: ${INGRESS_HOST}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ${SERVICE_NAME}
+                port:
+                  number: ${APPLICATION_PORT}
+EOF
+
+kubectl rollout status "deployment/${APP_NAME}" -n "${NAMESPACE}" --timeout=120s
+kubectl get pods,svc,ingress -n "${NAMESPACE}"

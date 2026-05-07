@@ -8,9 +8,8 @@
 flowchart TD
     Theory[Теория и примеры] --> DockerGate[Проверка Docker-готовности]
     DockerGate --> WhiteBoxBuild[Создание уязвимого приложения]
-    WhiteBoxBuild --> PublishImage[Публикация Docker image]
-    PublishImage --> Submit[Сдача image reference и white box отчета]
-    Submit --> TechnicalValidation[Техническая проверка image]
+    WhiteBoxBuild --> Submit[Загрузка архива стенда или image]
+    Submit --> TechnicalValidation[Техническая проверка стенда]
     TechnicalValidation --> CuratorReview[Проверка white box отчета]
     CuratorReview --> Publish[Публикация lab]
     Publish --> Distribution[Распределение peer labs]
@@ -18,6 +17,7 @@ flowchart TD
     BlackBoxTesting --> BlackBoxReport[Сдача black box отчета]
     BlackBoxReport --> FinalReview[Финальная проверка]
     FinalReview --> Results[Баллы и обратная связь]
+    Theory --> ArchiveTask[Запуск архивной S3-задачи]
 ```
 
 ## Фаза 1. Теория
@@ -32,7 +32,8 @@ flowchart TD
 - объяснение impact;
 - границы допустимого тестирования.
 
-Темы строятся по OWASP Top 10. Для MVP основной демонстрационный модуль - `A03. Injection`.
+Темы строятся по программе Академии web-безопасности: SQL-инъекции, XSS, SSTI, SSRF, CSRF, CORS,
+XXE, бизнес-логика, BAC и IDOR.
 
 ## Фаза 2. Docker readiness
 
@@ -40,9 +41,9 @@ flowchart TD
 
 Критерии допуска:
 
-- Docker image собирается локально;
-- image опубликован в registry;
-- image reference корректен;
+- архив стенда содержит `Dockerfile` или `docker-compose.yml`;
+- image собирается локально или опубликован в registry;
+- image reference корректен для fallback-сценария;
 - приложение стартует без ручного ввода;
 - port документирован;
 - опасные Docker-настройки не требуются.
@@ -53,7 +54,7 @@ flowchart TD
 
 Обязательные результаты:
 
-- Docker image reference;
+- архив стенда или Docker image reference;
 - port приложения;
 - опциональный health endpoint;
 - краткий README;
@@ -110,9 +111,11 @@ flowchart TD
 - скрывает автора от назначенных тестировщиков;
 - сохраняет runtime URL и status.
 
-## Фаза 7. Black box distribution
+## Фаза 7. Распределение задач студентов
 
-Администратор запускает распределение после появления достаточного числа утвержденных работ.
+Куратор или администратор запускает распределение после появления достаточного числа утвержденных
+работ. Одобрение стенда куратором означает только готовность к распределению; студент получает
+доступ строго после создания assignment.
 
 Правила:
 

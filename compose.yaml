@@ -20,17 +20,28 @@ services:
       PEP_DEMO_DATA_ENABLED: "true"
       PEP_VALIDATION_WORKER_ENABLED: "true"
       PEP_VALIDATION_WORKER_HOST_ADDRESS: host.docker.internal
-      PEP_GITLAB_BASE_URL: http://gitlab
-      PEP_GITLAB_GROUP: pep-tasks
-      PEP_GITLAB_TOKEN: ${PEP_GITLAB_TOKEN:-}
+      PEP_USER_STANDS_ENABLED: "true"
+      PEP_USER_STANDS_HOST_ADDRESS: host.docker.internal
+      PEP_STORAGE_S3_ENABLED: "true"
+      PEP_STORAGE_S3_ENDPOINT: http://minio:9000
+      PEP_STORAGE_S3_REGION: us-east-1
+      PEP_STORAGE_S3_BUCKET: pep-user-stands
+      PEP_STORAGE_S3_SYSTEM_BUCKET: pep-system-tasks
+      PEP_STORAGE_S3_ACCESS_KEY: minioadmin
+      PEP_STORAGE_S3_SECRET_KEY: minioadmin
+      PEP_STORAGE_S3_PATH_STYLE_ACCESS: "true"
+      PEP_SYSTEM_TASKS_ENABLED: "true"
+      PEP_SYSTEM_TASKS_HOST_ADDRESS: host.docker.internal
     depends_on:
       - postgres
+      - minio
     ports:
       - "8080:8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - .:/workspace
 
   frontend:
     build: ./frontend
@@ -45,6 +56,25 @@ services:
     container_name: pep-local-registry
     ports:
       - "5001:5000"
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    container_name: pep-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - pep-minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   k8s-toolbox:
     build: ./deploy/toolbox
@@ -62,27 +92,7 @@ services:
     ports:
       - "18080:18080"
 
-  gitlab:
-    image: gitlab/gitlab-ce:17.10.7-ce.0
-    container_name: pep-local-gitlab
-    profiles:
-      - gitlab
-    hostname: gitlab
-    environment:
-      GITLAB_OMNIBUS_CONFIG: |
-        external_url 'http://localhost:8929'
-        gitlab_rails['gitlab_shell_ssh_port'] = 2224
-    ports:
-      - "8929:8929"
-      - "2224:22"
-    volumes:
-      - pep-gitlab-config:/etc/gitlab
-      - pep-gitlab-logs:/var/log/gitlab
-      - pep-gitlab-data:/var/opt/gitlab
-
 volumes:
   pep-postgres:
   pep-kubeconfig:
-  pep-gitlab-config:
-  pep-gitlab-logs:
-  pep-gitlab-data:
+  pep-minio:

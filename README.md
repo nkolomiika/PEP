@@ -1,94 +1,33 @@
-# PEP - Практическая образовательная платформа по информационной безопасности
+# PEP - образовательная платформа по информационной безопасности
 
-PEP - образовательная платформа для студентов и начинающих специалистов в red team / pentest.
+PEP - практическая платформа для обучения web-безопасности, Docker, white box и black box тестированию.
+Платформа рассчитана на дипломную демонстрацию и локальный production-like контур: backend, frontend,
+PostgreSQL, локальный registry, `kind`-кластер, toolbox-контейнер и системные официальные
+пентест-стенды.
 
-Платформа поддерживает полный практический цикл обучения:
+## Возможности
 
-- изучение теории и примеров уязвимого кода на русском языке;
-- прохождение вводного курса по Docker;
-- создание уязвимого веб-приложения;
-- загрузка архива стенда с `Dockerfile`/`docker-compose.yml` или fallback-публикация готового Docker image;
-- доказательство уязвимости в white box отчете;
-- тестирование чужих приложений в black box формате;
-- экспертная проверка отчетов и выставление баллов.
+- Русскоязычные учебные материалы с Markdown, примерами уязвимого кода и практическими методиками.
+- Вводный курс по Docker.
+- Академия web-безопасности: SQL-инъекции, XSS, SSTI, SSRF, CSRF, CORS, XXE, бизнес-логика, BAC, IDOR.
+- Загрузка студентом архива стенда с `Dockerfile` или `docker-compose.yml`.
+- Fallback-режим отправки готового Docker image reference.
+- Техническая проверка стенда: сборка, image metadata scan, dependency metadata scan, запуск контейнера и health check.
+- White box и black box отчеты с вложениями.
+- Проверка отчетов куратором.
+- Запуск лабораторий в `kind` с локальными ingress-доменами.
+- Официальные системные стенды: админ публикует задачу, PEP подготавливает image и запускает стенд на 4 часа.
+- Админ-панель: курсы, модули, Markdown-редактор страниц, пользователи, аудит, online-статистика, системные задачи.
 
 ## Технологический стек
 
-- Backend: Java, Spring Boot, Spring Security, Spring Data JPA
-- Frontend: React, TypeScript, Vite
-- База данных: PostgreSQL
-- Хранилище: S3-compatible object storage
-- Фоновые задачи: очередь сообщений и worker-сервисы
-- Запуск лабораторий: `kind` внутри Docker, управление через `k8s-toolbox` container
-- Наблюдаемость: OpenTelemetry, Prometheus, Grafana, Loki или ELK
+- Backend: Java 17, Spring Boot, Spring Security, Spring Data JPA, Flyway.
+- Frontend: React, TypeScript, Vite.
+- Database: PostgreSQL, H2 для тестов.
+- Runtime: Docker, Docker Compose, local registry, `kind`, `kubectl`, nginx ingress.
+- Auth: server-side sessions через `HttpOnly` cookie, CSRF token для unsafe methods.
 
-## Структура репозитория
-
-- `backend/` - Spring Boot API и доменная логика
-- `frontend/` - React/TypeScript интерфейс
-- `docs/` - требования, архитектура, доменная модель, безопасность и учебный план
-- `examples/vulnerable-sqli-demo/` - демонстрационное приложение для модуля `A03. Injection`
-- `deploy/k8s/` - Kubernetes-манифесты платформы и лабораторной среды
-
-## Документация
-
-Базовое проектирование:
-
-- `docs/requirements.md`
-- `docs/user-stories.md`
-- `docs/architecture.md`
-- `docs/domain-model.md`
-- `docs/api-contract.md`
-- `docs/openapi-plan.md`
-- `docs/database-schema-plan.md`
-- `docs/rbac-permissions.md`
-- `docs/status-and-errors.md`
-
-Учебный контент и оценивание:
-
-- `docs/docker-course.md`
-- `docs/owasp-top-10-course.md`
-- `docs/grading-rubrics.md`
-- `docs/learning-cycle.md`
-- `docs/content-versioning-and-licensing.md`
-- `docs/ui-content-guidelines.md`
-
-Lab runtime, безопасность и эксплуатация:
-
-- `docs/security-model.md`
-- `docs/local-kind.md`
-- `docs/sample-vulnerable-app.md`
-- `docs/operations-runbook.md`
-- `docs/queue-retry-policy.md`
-- `docs/observability-plan.md`
-- `docs/configuration-and-secrets.md`
-- `docs/privacy-and-data.md`
-- `docs/acceptable-use-and-ethics.md`
-
-MVP, тестирование и защита:
-
-- `docs/mvp-backlog.md`
-- `docs/mvp-scope-boundaries.md`
-- `docs/implementation-dependencies.md`
-- `docs/frontend-route-map.md`
-- `docs/accessibility-compatibility.md`
-- `docs/notifications.md`
-- `docs/demo-data-plan.md`
-- `docs/traceability-matrix.md`
-- `docs/ci-quality-gates.md`
-- `docs/risk-register.md`
-- `docs/documentation-readiness.md`
-- `docs/release-handoff-checklist.md`
-- `docs/architecture-decisions.md`
-- `docs/roadmap.md`
-- `docs/testing-and-demo.md`
-- `docs/thesis-outline.md`
-- `docs/defense-presentation.md`
-
-## Быстрый локальный запуск demo-контура
-
-Для локальной демонстрации backend, frontend, PostgreSQL, registry и toolbox запускаются через Docker
-Compose. В этом режиме явно включены demo data и demo validation worker:
+## Быстрый запуск
 
 ```powershell
 docker compose up --build
@@ -96,115 +35,251 @@ docker compose up --build
 
 После запуска:
 
-- frontend HTTPS: `https://localhost:5443`
-- frontend HTTP fallback: `http://localhost:5173`
-- backend API: `http://localhost:8080`
-- health endpoint: `http://localhost:8080/actuator/health`
+- Frontend HTTPS: `https://localhost:5443`
+- Frontend HTTP fallback: `http://localhost:5173`
+- Backend API: `http://localhost:8080`
+- Backend health: `http://localhost:8080/actuator/health`
+- Local registry: `localhost:5001`
 
-Локальный HTTPS использует self-signed certificate, поэтому браузер покажет предупреждение. Для
-demo-запуска `compose.yaml` задает `PEP_DEMO_DATA_ENABLED=true`, чтобы создать учебные аккаунты и
-курсы. В production этот флаг по умолчанию выключен.
+> **Важно для пользователей с системным HTTP/HTTPS-прокси (VPN, Clash, Shadowsocks, V2Ray и т. п.).**
+> URL запущенных стендов имеют вид `http://task-<slug>-<id>.127.0.0.1.nip.io:8088`. Если в системе включён прокси,
+> Chrome и любые `HttpClient`-приложения будут пытаться достучаться до стенда через него и получат 502 (прокси
+> не видит локальный kind-кластер). Добавь `*.nip.io;localhost;127.0.0.1;<local>` в bypass:
+> Настройки Windows → «Прокси» → раздел «Не использовать прокси для адресов, начинающихся со следующих записей»,
+> либо PowerShell:
+>
+> ```powershell
+> Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' \
+>   -Name ProxyOverride -Value '*.nip.io;localhost;127.0.0.1;<local>'
+> ```
+>
+> После этого перезапусти Chrome (или просто открой ссылку стенда заново). `curl.exe` к bypass нечувствителен
+> и работает напрямую — этим удобно проверять доступность стенда: `curl http://task-...127.0.0.1.nip.io:8088/`.
 
-Frontend больше не содержит demo-пароли в bundle. Вход выполняется через `/api/auth/login`, backend
-создает server-side session и устанавливает `HttpOnly` cookie `PEP_SESSION`. Перед login и
-любыми небезопасными запросами frontend получает CSRF token через `/api/auth/csrf` и отправляет
-его в `X-XSRF-TOKEN`. Для demo входа
-используйте seed-аккаунты: `student1@pep.local`, `student2@pep.local`, `curator@pep.local`,
-`admin@pep.local`.
+Demo-аккаунты:
 
-Auth-события пишутся в audit trail: успешный login, logout, неверные попытки входа и срабатывание
-rate limit. Для неуспешных попыток в metadata сохраняется hash email, а не raw password или введенный
-секрет.
+| Роль | Email | Пароль |
+| --- | --- | --- |
+| Администратор | `admin@local.host` | `admin` |
+| Куратор | `teacher@local.host` | `teacher` |
+| Студент | `student@local.host` | `student` |
+| Demo admin | `admin@pep.local` | `admin` |
+| Demo curator | `curator@pep.local` | `curator` |
+| Demo student 1 | `student1@pep.local` | `student` |
+| Demo student 2 | `student2@pep.local` | `student` |
 
-Frontend nginx отдает SPA через HTTPS redirect и добавляет production security headers: Content
-Security Policy, HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` и
-`Permissions-Policy`. Backend API также добавляет deny-by-default CSP для JSON endpoints.
+## Основные флоу
 
-В demo-режиме backend также запускает validation worker: он использует Docker socket хоста,
-скачивает отправленный image, временно запускает container и проверяет port/health endpoint.
+### Авторизация
 
-## Production defaults
+```mermaid
+flowchart TD
+    user["Пользователь"] --> frontend["Frontend"]
+    frontend --> csrf["GET /api/auth/csrf"]
+    frontend --> login["POST /api/auth/login"]
+    login --> backend["Backend"]
+    backend --> session["AuthSession"]
+    session --> cookie["HttpOnly PEP_SESSION"]
+    cookie --> frontend
+```
 
-Production-конфигурация не должна создавать demo-пользователей и учебные пароли автоматически.
-По умолчанию backend использует:
+1. Frontend получает CSRF token.
+2. Пользователь отправляет email и пароль.
+3. Backend проверяет учетную запись, rate limit и пароль.
+4. Backend создает server-side session и ставит `PEP_SESSION`.
+5. Все последующие API-запросы идут с cookie и CSRF header для небезопасных методов.
 
-- `PEP_DEMO_DATA_ENABLED=false` - demo seed отключен;
-- `PEP_AUTH_BASIC_ENABLED=false` - HTTP Basic отключен, используется session cookie;
-- `PEP_AUTH_CSRF_ENABLED=true` - CSRF-защита включена для cookie-based auth;
-- `PEP_AUTH_SESSION_TTL_HOURS=8` - срок жизни server-side session;
-- `PEP_AUTH_LOGIN_MAX_FAILED_ATTEMPTS=5`, `PEP_AUTH_LOGIN_FAILED_WINDOW_MINUTES=15`,
-  `PEP_AUTH_LOGIN_LOCK_MINUTES=15` - защита login от brute force;
-- `PEP_AUTH_CLEANUP_INTERVAL_MS=3600000`, `PEP_AUTH_CLEANUP_EXPIRED_RETENTION_HOURS=24`,
-  `PEP_AUTH_CLEANUP_REVOKED_RETENTION_HOURS=24`,
-  `PEP_AUTH_CLEANUP_THROTTLE_RETENTION_HOURS=24` - очистка inactive sessions и login throttle rows;
-- `PEP_VALIDATION_WORKER_ENABLED=false` - worker включается только на выделенном runtime;
-- `PEP_MULTIPART_MAX_FILE_SIZE=10MB` и `PEP_MULTIPART_MAX_REQUEST_SIZE=12MB` - явные лимиты upload;
-- внешние secret values для database credentials, TLS и storage paths.
+### Обучение и сдача студентского стенда
 
-Для production deployment нужно создать первого администратора отдельной миграцией, admin CLI или
-интеграцией с корпоративным identity provider. Demo-аккаунты `*@pep.local` не должны попадать в
-production database.
+```mermaid
+flowchart TD
+    student["Студент"] --> course["Курс и модуль"]
+    course --> archive["Архив с Dockerfile или Compose"]
+    archive --> api["POST /api/submissions/archive"]
+    api --> storage["Archive storage"]
+    api --> validationJob["ValidationJob"]
+    validationJob --> worker["ValidationWorker"]
+    worker --> build["Docker build"]
+    build --> registry["Local registry"]
+    worker --> run["Temporary container"]
+    run --> health["Port and health check"]
+    health --> review["White box отчет"]
+    review --> curator["Проверка куратором"]
+```
 
-## Запуск lab runtime через containerized kind
+Студент загружает архив проекта. Backend сохраняет архив, создает submission и validation job.
+Worker распаковывает проект, проверяет опасные настройки, собирает image, публикует его в registry,
+временно запускает контейнер и проверяет доступность.
 
-Для демонстрации запуска уязвимых приложений используется `kind`, но `kind`, `kubectl` и Docker CLI
-запускаются из `k8s-toolbox` container. На хосте нужен только Docker Desktop/Engine с Docker Compose.
+### Запуск лаборатории для black box
 
-Запустить registry и toolbox:
+```mermaid
+flowchart TD
+    admin["Администратор"] --> approved["Принятая работа"]
+    approved --> createLab["POST /api/labs"]
+    createLab --> labInstance["LabInstance"]
+    labInstance --> toolbox["k8s-toolbox"]
+    toolbox --> kind["kind cluster"]
+    kind --> namespace["Namespace, quota, deployment, service"]
+    namespace --> ingress["Ingress"]
+    ingress --> url["lab-id.127.0.0.1.nip.io:8088"]
+    url --> student["Другой студент"]
+```
+
+Администратор создает lab instance для принятой работы. UI показывает команды toolbox и ingress URL.
+Black box assignment распределяет чужие стенды студентам.
+
+## Архитектура компонентов
+
+```mermaid
+flowchart TD
+    subgraph client["Client"]
+        browser["Browser"]
+        frontend["React frontend"]
+    end
+    subgraph app["Application"]
+        backend["Spring Boot API"]
+        security["Spring Security"]
+        workers["Validation and task services"]
+    end
+    subgraph data["Data"]
+        postgres["PostgreSQL"]
+        files["Archive and attachment storage"]
+    end
+    subgraph runtime["Runtime"]
+        registry["Local registry"]
+        toolbox["k8s-toolbox"]
+        kind["kind cluster"]
+        ingress["Ingress"]
+    end
+    browser --> frontend
+    frontend --> backend
+    backend --> security
+    backend --> postgres
+    backend --> files
+    workers --> registry
+    workers --> toolbox
+    toolbox --> kind
+    kind --> ingress
+```
+
+### Backend
+
+- `CorePlatformController` - основной REST API.
+- `CorePlatformService` - курсы, уроки, submissions, отчеты, lab runtime, пользователи.
+- `ValidationWorkerService` - technical validation и сборка archive submissions.
+- `PentestTaskService` - каталог системных стендов, сборка задач, запуск экземпляров.
+- `AuthSessionService` - login/logout/session cookie/rate limit.
+- `AuditService` - события безопасности и администрирования.
+
+### Frontend
+
+- `TopNavigation` - основные разделы: рабочая область, курсы, стенды, личный кабинет.
+- `CoursesPage` - каталог курсов и модулей.
+- `StudentDashboard` - обучение, практика, отчеты.
+- `CuratorDashboard` - technical validation и проверка отчетов.
+- `AdminDashboard` - курсы, пользователи, системные задачи, labs, аудит, аналитика.
+- `PentestTasksPage` - каталог официальных стендов и активные запуски студента.
+
+### Database
+
+Ключевые таблицы:
+
+- `app_user`, `auth_session`, `auth_login_throttle`
+- `course`, `module`, `lesson`, `lesson_progress`
+- `submission`, `validation_job`
+- `report`, `review`, `report_attachment`
+- `lab_instance`, `black_box_assignment`
+- `pentest_task`, `pentest_task_build`, `pentest_task_instance`
+- `audit_event`
+
+## User stories
+
+### Студент
+
+- Как студент, я хочу открыть каталог курсов, выбрать модуль и изучить материал.
+- Как студент, я хочу загрузить архив со стендом, чтобы платформа сама собрала и проверила приложение.
+- Как студент, я хочу отправить white box отчет с доказательствами уязвимости.
+- Как студент, я хочу получить чужой стенд для black box проверки.
+- Как студент, я хочу открыть системный стенд на 4 часа по поддомену.
+
+### Куратор
+
+- Как куратор, я хочу видеть очередь отчетов и проверять их.
+- Как куратор, я хочу видеть результаты technical validation и контекст submission.
+- Как куратор, я хочу экспортировать оценки по модулю.
+
+### Администратор
+
+- Как администратор, я хочу создавать курсы, модули и страницы в Markdown.
+- Как администратор, я хочу создавать и отключать пользователей.
+- Как администратор, я хочу видеть online-статистику и аудит.
+- Как администратор, я хочу запускать lab runtime и распределять black box цели.
+
+## Lab runtime через kind
+
+Запуск registry и toolbox:
 
 ```powershell
 docker compose up -d registry k8s-toolbox
 ```
 
-Создать `kind` cluster из toolbox container:
+Создание кластера:
 
 ```powershell
 docker compose exec k8s-toolbox pep-kind-create
 ```
 
-Собрать и опубликовать demo image через toolbox:
-
-```powershell
-docker compose exec k8s-toolbox docker build -t vulnerable-sqli-demo:latest ./examples/vulnerable-sqli-demo
-docker compose exec k8s-toolbox docker tag vulnerable-sqli-demo:latest localhost:5001/vulnerable-sqli-demo:latest
-docker compose exec k8s-toolbox docker push localhost:5001/vulnerable-sqli-demo:latest
-```
-
-Развернуть lab для принятой submission:
+Установка ingress:
 
 ```powershell
 docker compose exec k8s-toolbox pep-ingress-install
-docker compose exec k8s-toolbox pep-lab-deploy <submissionId> localhost:5001/vulnerable-sqli-demo:latest 8080
 ```
 
-Открыть lab через ingress URL:
-
-```text
-http://lab-<submissionId-prefix>.127.0.0.1.nip.io:8088
-```
-
-Port-forward остается fallback-вариантом:
+Запуск student lab:
 
 ```powershell
-docker compose exec k8s-toolbox pep-lab-forward <submissionId> 8080 18080
+docker compose exec k8s-toolbox pep-lab-deploy <submissionId> localhost:5001/image:latest 8080
 ```
 
-Подробный сценарий описан в `docs/local-kind.md`.
+Запуск task lab:
 
-## Демонстрационный сценарий
+```powershell
+docker compose exec k8s-toolbox pep-task-deploy <namespace> localhost:5001/pentest-task-demo:latest 8080
+```
 
-1. Администратор создает курс OWASP Top 10 и модуль `A03. Injection`.
-2. Студент проходит вводный Docker-курс.
-3. Студент загружает архив проекта со стендом или отправляет готовый image reference.
-4. Worker собирает archive submission в local registry и выполняет technical-only validation.
-5. Студент отправляет white box отчет.
-6. Куратор утверждает white box отчет.
-7. Платформа запускает lab в `kind`.
-8. Другой студент получает lab для black box тестирования.
-9. Студент отправляет black box отчет.
-10. Куратор выставляет баллы и комментарии.
+## Production defaults
 
-## Примечание по планам Cursor
+- `PEP_DEMO_DATA_ENABLED=false`
+- `PEP_AUTH_BASIC_ENABLED=false`
+- `PEP_AUTH_CSRF_ENABLED=true`
+- `PEP_VALIDATION_WORKER_ENABLED=false`
+- `PEP_AUTH_COOKIE_SECURE=true`
+- Docker socket доступен только из выделенного worker/toolbox runtime
 
-Исходные plan-файлы Cursor не являются частью runtime приложения и не редактируются при доработке
-проекта. Актуальная проектная документация хранится в `docs/`.
+## Проверка
+
+Backend:
+
+```powershell
+cd backend
+mvn test
+```
+
+Frontend:
+
+```powershell
+cd frontend
+npm run build
+```
+
+Полный demo-контур:
+
+```powershell
+docker compose up --build
+```
+
+## Примечание
+
+Cursor plan-файлы не являются runtime-документацией. Актуальная инструкция по запуску и архитектуре
+поддерживается в этом `README.md` и в `docs/`.

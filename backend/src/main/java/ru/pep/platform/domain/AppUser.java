@@ -41,6 +41,9 @@ public class AppUser {
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
 
+    @Column(name = "avatar_storage_key", length = 120)
+    private String avatarStorageKey;
+
     protected AppUser() {
     }
 
@@ -90,7 +93,18 @@ public class AppUser {
         return status;
     }
 
+    public OffsetDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
     public void updateProfile(String displayName, Role role, UserStatus status) {
+        this.displayName = displayName;
+        this.role = role;
+        this.status = status;
+    }
+
+    public void updateAdminProfile(String email, String displayName, Role role, UserStatus status) {
+        this.email = email;
         this.displayName = displayName;
         this.role = role;
         this.status = status;
@@ -98,5 +112,25 @@ public class AppUser {
 
     public void disable() {
         this.status = UserStatus.DISABLED;
+    }
+
+    public String getAvatarStorageKey() {
+        return avatarStorageKey;
+    }
+
+    public void setAvatarStorageKey(String avatarStorageKey) {
+        this.avatarStorageKey = avatarStorageKey;
+    }
+
+    public void applyDisplayName(String displayName) {
+        this.displayName = displayName;
+    }
+
+    public void applyEmail(String email) {
+        this.email = email;
+    }
+
+    public void applyPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
     }
 }

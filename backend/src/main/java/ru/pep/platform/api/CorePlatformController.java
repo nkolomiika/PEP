@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpStatus;
@@ -18,6 +19,7 @@ import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -28,6 +30,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import ru.pep.platform.service.AuthSessionService;
 import ru.pep.platform.service.CorePlatformService;
+import ru.pep.platform.service.PentestTaskService;
 
 @RestController
 @RequestMapping("/api")
@@ -35,10 +38,15 @@ public class CorePlatformController {
 
     private final CorePlatformService platform;
     private final AuthSessionService sessions;
+    private final PentestTaskService pentestTasks;
 
-    public CorePlatformController(CorePlatformService platform, AuthSessionService sessions) {
+    public CorePlatformController(
+            CorePlatformService platform,
+            AuthSessionService sessions,
+            PentestTaskService pentestTasks) {
         this.platform = platform;
         this.sessions = sessions;
+        this.pentestTasks = pentestTasks;
     }
 
     @GetMapping("/auth/csrf")
@@ -56,10 +64,7 @@ public class CorePlatformController {
                 clientAddress(servletRequest));
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, result.cookie().toString())
-                .body(new CoreDtos.CurrentUserResponse(
-                        result.user().getEmail(),
-                        result.user().getDisplayName(),
-                        result.user().getRole()));
+                .body(platform.toUserResponse(result.user()));
     }
 
     @PostMapping("/auth/logout")
@@ -78,6 +83,30 @@ public class CorePlatformController {
         return platform.currentUserProfile(principal.getName());
     }
 
+    @PatchMapping("/me")
+    public CoreDtos.CurrentUserResponse patchProfile(
+            Principal principal, @RequestBody CoreDtos.UpdateProfileRequest request) {
+        return platform.updateProfile(principal.getName(), request);
+    }
+
+    @PostMapping("/me/password")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void changeMyPassword(
+            Principal principal, @Valid @RequestBody CoreDtos.ChangePasswordRequest request) {
+        platform.changePassword(principal.getName(), request);
+    }
+
+    @PostMapping(path = "/me/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public CoreDtos.CurrentUserResponse uploadAvatar(
+            Principal principal, @RequestParam("file") MultipartFile file) {
+        return platform.uploadAvatar(principal.getName(), file);
+    }
+
+    @GetMapping("/me/avatar")
+    public ResponseEntity<Resource> downloadMyAvatar(Principal principal) {
+        return platform.avatarResource(principal.getName());
+    }
+
     private String clientAddress(HttpServletRequest request) {
         String forwardedFor = request.getHeader("X-Forwarded-For");
         if (forwardedFor != null && !forwardedFor.isBlank()) {
@@ -87,8 +116,8 @@ public class CorePlatformController {
     }
 
     @GetMapping("/courses")
-    public List<CoreDtos.CourseResponse> listCourses() {
-        return platform.listCourses();
+    public List<CoreDtos.CourseResponse> listCourses(Principal principal) {
+        return platform.listCourses(principal == null ? null : principal.getName());
     }
 
     @PostMapping("/admin/courses")
@@ -122,8 +151,14 @@ public class CorePlatformController {
 
     @GetMapping("/admin/users")
     @PreAuthorize("hasRole('ADMIN')")
-    public List<CoreDtos.AdminUserResponse> listUsers() {
-        return platform.listUsers();
+    public Object listUsers(
+            @RequestParam(value = "q", required = false) String query,
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size) {
+        if (query == null && page == null && size == null) {
+            return platform.listUsers(null, 0, 100).items();
+        }
+        return platform.listUsers(query, page == null ? 0 : page, size == null ? 10 : size);
     }
 
     @PostMapping("/admin/users")
@@ -133,11 +168,33 @@ public class CorePlatformController {
         return platform.createUser(request);
     }
 
+    @PatchMapping("/admin/users/{userId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public CoreDtos.AdminUserResponse updateUser(
+            @PathVariable UUID userId,
+            @Valid @RequestBody CoreDtos.UpdateUserRequest request) {
+        return platform.updateUser(userId, request);
+    }
+
     @PostMapping("/admin/users/{userId}/disable")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("hasRole('ADMIN')")
     public void disableUser(@PathVariable UUID userId) {
         platform.disableUser(userId);
+    }
+
+    @PostMapping("/admin/users/disable")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasRole('ADMIN')")
+    public void disableUsers(@Valid @RequestBody CoreDtos.BulkUserActionRequest request) {
+        platform.disableUsers(request.userIds());
+    }
+
+    @PostMapping("/admin/users/delete")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasRole('ADMIN')")
+    public void deleteUsers(@Valid @RequestBody CoreDtos.BulkUserActionRequest request) {
+        platform.deleteUsers(request.userIds());
     }
 
     @DeleteMapping("/admin/users/{userId}")
@@ -153,6 +210,54 @@ public class CorePlatformController {
         return platform.onlineUsers();
     }
 
+    @GetMapping("/pentest-tasks")
+    @PreAuthorize("hasAnyRole('STUDENT','CURATOR','ADMIN')")
+    public List<CoreDtos.PentestTaskResponse> listPentestTasks(Principal principal) {
+        return pentestTasks.listTasks(principal == null ? null : principal.getName());
+    }
+
+    @GetMapping("/lessons/{lessonId}/pentest-tasks")
+    @PreAuthorize("hasAnyRole('STUDENT','CURATOR','ADMIN')")
+    public List<CoreDtos.PentestTaskResponse> listLessonPentestTasks(
+            Principal principal, @PathVariable UUID lessonId) {
+        return pentestTasks.listTasksForLesson(principal == null ? null : principal.getName(), lessonId);
+    }
+
+    @GetMapping("/pentest-tasks/{taskId}")
+    @PreAuthorize("hasAnyRole('STUDENT','CURATOR','ADMIN')")
+    public CoreDtos.PentestTaskResponse getPentestTask(@PathVariable UUID taskId) {
+        return pentestTasks.getTask(taskId);
+    }
+
+    @PostMapping("/pentest-tasks/{taskId}/instances")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('STUDENT')")
+    public CoreDtos.PentestTaskInstanceResponse startPentestTask(Principal principal, @PathVariable UUID taskId) {
+        return pentestTasks.startInstance(principal.getName(), taskId);
+    }
+
+    @GetMapping("/pentest-task-instances/my")
+    @PreAuthorize("hasRole('STUDENT')")
+    public List<CoreDtos.PentestTaskInstanceResponse> myPentestTaskInstances(Principal principal) {
+        return pentestTasks.myInstances(principal.getName());
+    }
+
+    @PostMapping("/pentest-task-instances/{instanceId}/stop")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasAnyRole('STUDENT','ADMIN')")
+    public void stopPentestTaskInstance(Principal principal, @PathVariable UUID instanceId) {
+        pentestTasks.stopInstance(principal.getName(), instanceId);
+    }
+
+    @PostMapping("/pentest-task-instances/{instanceId}/flag")
+    @PreAuthorize("hasAnyRole('STUDENT','ADMIN')")
+    public CoreDtos.PentestTaskFlagSubmitResponse submitPentestTaskFlag(
+            Principal principal,
+            @PathVariable UUID instanceId,
+            @Valid @RequestBody CoreDtos.PentestTaskFlagSubmitRequest request) {
+        return pentestTasks.submitFlag(principal.getName(), instanceId, request);
+    }
+
     @GetMapping("/modules/{moduleId}/lessons")
     public List<CoreDtos.LessonSummaryResponse> listLessons(@PathVariable UUID moduleId) {
         return platform.listLessons(moduleId);
@@ -161,24 +266,6 @@ public class CorePlatformController {
     @GetMapping("/lessons/{lessonId}")
     public CoreDtos.LessonResponse getLesson(@PathVariable UUID lessonId) {
         return platform.getLesson(lessonId);
-    }
-
-    @GetMapping("/modules/{moduleId}/lesson-progress")
-    @PreAuthorize("hasRole('STUDENT')")
-    public List<CoreDtos.LessonProgressResponse> listLessonProgress(Principal principal, @PathVariable UUID moduleId) {
-        return platform.listLessonProgress(principal.getName(), moduleId);
-    }
-
-    @PostMapping("/lessons/{lessonId}/complete")
-    @PreAuthorize("hasRole('STUDENT')")
-    public CoreDtos.LessonProgressResponse completeLesson(Principal principal, @PathVariable UUID lessonId) {
-        return platform.completeLesson(principal.getName(), lessonId);
-    }
-
-    @GetMapping("/modules/{moduleId}/result")
-    @PreAuthorize("hasRole('STUDENT')")
-    public CoreDtos.ModuleResultResponse getModuleResult(Principal principal, @PathVariable UUID moduleId) {
-        return platform.getModuleResult(principal.getName(), moduleId);
     }
 
     @GetMapping("/modules/{moduleId}/grades/export")

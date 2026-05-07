@@ -82,8 +82,8 @@ class CorePlatformSecurityAndValidationTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
 
-        mockMvc.perform(post("/api/lessons/{lessonId}/complete", "00000000-0000-0000-0000-000000000001")
-                        .with(httpBasic("admin@pep.local", "admin")))
+        mockMvc.perform(get("/api/admin/users")
+                        .with(httpBasic("student1@pep.local", "student")))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
     }

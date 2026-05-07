@@ -1,6 +1,10 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: pep-local
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."pep-local-registry:5000"]
+      endpoint = ["http://pep-local-registry:5000"]
 nodes:
   - role: control-plane
     extraPortMappings:

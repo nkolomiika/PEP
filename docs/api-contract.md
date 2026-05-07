@@ -28,6 +28,18 @@
 Security layer использует тот же JSON-формат: unauthenticated private API возвращает
 `401 AUTHENTICATION_REQUIRED`, authenticated-but-forbidden действия возвращают `403 ACCESS_DENIED`.
 
+Постраничные списки возвращают:
+
+```json
+{
+  "items": [],
+  "page": 0,
+  "size": 10,
+  "totalItems": 0,
+  "totalPages": 0
+}
+```
+
 ## Auth
 
 ### `GET /api/auth/csrf`
@@ -59,6 +71,61 @@ Response:
   "role": "STUDENT"
 }
 ```
+
+Если у пользователя есть аватар, `avatarUrl` содержит cache-busted URL вида `/api/me/avatar?v=...`.
+
+## Admin Users
+
+### `GET /api/admin/users?page=0&size=10&q=term`
+
+Назначение: постраничный список пользователей для админки. `q` ищет по email и имени.
+Без query-параметров endpoint сохраняет legacy-ответ массивом.
+
+### `POST /api/admin/users`
+
+Создает пользователя.
+
+### `PATCH /api/admin/users/{userId}`
+
+Редактирует email, имя, роль и статус пользователя.
+
+### `POST /api/admin/users/disable`
+
+Soft-block выбранных пользователей через `UserStatus.DISABLED`.
+
+### `POST /api/admin/users/delete`
+
+Удаляет выбранных пользователей физически, если это не блокируется связями БД.
+
+## Streams
+
+### `GET /api/admin/streams?page=0&size=10&q=term`
+
+Постраничный список потоков для админа и куратора. `q` ищет по названию.
+
+### `POST /api/admin/streams`
+
+Создает поток. Курсы и пользователи добавляются через существующие endpoints:
+`POST /api/admin/streams/{streamId}/courses` и `POST /api/admin/streams/{streamId}/members`.
+
+### `POST /api/admin/peer-stands/assign`
+
+Админ или куратор распределяет peer-задачи выбранным студентам. Одобрение стенда куратором не
+создает доступ студентам само по себе; доступ появляется только после записи assignment.
+
+```json
+{
+  "moduleId": "uuid",
+  "userIds": ["uuid"],
+  "count": 4
+}
+```
+
+## Pentest Tasks
+
+Legacy GitLab-задачи удаляются миграцией и исключены из активных списков. Рабочие источники задач:
+`ARCHIVE` и `PROMOTED_FROM_STAND`; архивные задачи должны пройти сборку/валидацию и иметь
+определенный application port перед запуском instance.
 
 ### `POST /api/auth/login`
 
@@ -120,25 +187,6 @@ Response:
 Назначение: открыть урок с Markdown-контентом и примерами кода.
 Frontend обязан рендерить Markdown безопасно: без raw HTML injection и без кликабельных опасных
 link schemes.
-
-### `GET /api/modules/{moduleId}/lesson-progress`
-
-Роль: студент.
-
-Назначение: получить progress студента по урокам модуля.
-
-### `GET /api/modules/{moduleId}/result`
-
-Роль: студент.
-
-Назначение: получить итог модуля по формуле `WhiteBox * 0.45 + BlackBox * 0.55`, если Docker-допуск
-пройден и оба отчета проверены куратором.
-
-### `POST /api/lessons/{lessonId}/complete`
-
-Роль: студент.
-
-Назначение: отметить урок как изученный.
 
 ## Submissions
 

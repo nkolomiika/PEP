@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$#" -lt 1 ]; then
+  echo "Usage: pep-task-undeploy <namespace>" >&2
+  exit 1
+fi
+
+NAMESPACE="$1"
+
+kubectl delete namespace "${NAMESPACE}" --ignore-not-found=true --wait=false

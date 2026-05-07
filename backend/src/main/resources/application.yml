@@ -3,8 +3,8 @@ spring:
     name: pep-backend
   servlet:
     multipart:
-      max-file-size: ${PEP_MULTIPART_MAX_FILE_SIZE:10MB}
-      max-request-size: ${PEP_MULTIPART_MAX_REQUEST_SIZE:12MB}
+      max-file-size: ${PEP_MULTIPART_MAX_FILE_SIZE:200MB}
+      max-request-size: ${PEP_MULTIPART_MAX_REQUEST_SIZE:210MB}
   datasource:
     url: ${PEP_DATABASE_URL:jdbc:h2:mem:pep;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE}
     username: ${PEP_DATABASE_USERNAME:pep}
@@ -29,6 +29,7 @@ management:
 pep:
   auth:
     session-ttl-hours: ${PEP_AUTH_SESSION_TTL_HOURS:8}
+    # Без HTTPS браузер не примет флаг Secure — сессия не сохранится (PEP_AUTH_COOKIE_SECURE=false для http://localhost).
     cookie-secure: ${PEP_AUTH_COOKIE_SECURE:true}
     basic-enabled: ${PEP_AUTH_BASIC_ENABLED:false}
     csrf-enabled: ${PEP_AUTH_CSRF_ENABLED:true}
@@ -51,6 +52,8 @@ pep:
     default-ttl-hours: 168
   attachments:
     storage-dir: ${PEP_ATTACHMENTS_STORAGE_DIR:var/report-attachments}
+  avatar:
+    storage-dir: ${PEP_AVATAR_STORAGE_DIR:var/avatars}
   validation-worker:
     enabled: ${PEP_VALIDATION_WORKER_ENABLED:false}
     poll-interval-ms: ${PEP_VALIDATION_WORKER_POLL_INTERVAL_MS:5000}
@@ -58,11 +61,41 @@ pep:
     command-timeout-seconds: ${PEP_VALIDATION_WORKER_COMMAND_TIMEOUT_SECONDS:120}
     health-timeout-seconds: ${PEP_VALIDATION_WORKER_HEALTH_TIMEOUT_SECONDS:30}
     local-registry: ${PEP_VALIDATION_WORKER_LOCAL_REGISTRY:localhost:5001}
-  gitlab:
-    base-url: ${PEP_GITLAB_BASE_URL:http://localhost:8929}
-    token: ${PEP_GITLAB_TOKEN:}
-    group: ${PEP_GITLAB_GROUP:pep-tasks}
-    default-branch: ${PEP_GITLAB_DEFAULT_BRANCH:main}
   pentest-tasks:
     default-duration-minutes: ${PEP_PENTEST_TASK_DEFAULT_DURATION_MINUTES:240}
     local-registry: ${PEP_PENTEST_TASK_LOCAL_REGISTRY:localhost:5001}
+  storage:
+    s3:
+      enabled: ${PEP_STORAGE_S3_ENABLED:false}
+      endpoint: ${PEP_STORAGE_S3_ENDPOINT:http://localhost:9000}
+      region: ${PEP_STORAGE_S3_REGION:us-east-1}
+      bucket: ${PEP_STORAGE_S3_BUCKET:pep-user-stands}
+      system-bucket: ${PEP_STORAGE_S3_SYSTEM_BUCKET:pep-system-tasks}
+      access-key: ${PEP_STORAGE_S3_ACCESS_KEY:minioadmin}
+      secret-key: ${PEP_STORAGE_S3_SECRET_KEY:minioadmin}
+      path-style-access: ${PEP_STORAGE_S3_PATH_STYLE_ACCESS:true}
+  user-stands:
+    enabled: ${PEP_USER_STANDS_ENABLED:false}
+    poll-interval-ms: ${PEP_USER_STANDS_POLL_INTERVAL_MS:3000}
+    host-address: ${PEP_USER_STANDS_HOST_ADDRESS:host.docker.internal}
+    local-registry: ${PEP_USER_STANDS_LOCAL_REGISTRY:localhost:5001}
+    command-timeout-seconds: ${PEP_USER_STANDS_COMMAND_TIMEOUT_SECONDS:300}
+    max-archive-bytes: ${PEP_USER_STANDS_MAX_ARCHIVE_BYTES:209715200}
+    # Лимит размера собранного образа (в байтах). По умолчанию 10 GiB — стенды должны быть небольшими.
+    max-image-bytes: ${PEP_USER_STANDS_MAX_IMAGE_BYTES:10737418240}
+    health-attempts: ${PEP_USER_STANDS_HEALTH_ATTEMPTS:30}
+    health-interval-ms: ${PEP_USER_STANDS_HEALTH_INTERVAL_MS:1000}
+    instance-ttl-minutes: ${PEP_USER_STANDS_INSTANCE_TTL_MINUTES:60}
+    cleanup-interval-ms: ${PEP_USER_STANDS_CLEANUP_INTERVAL_MS:60000}
+    upload-temp-dir: ${PEP_USER_STANDS_UPLOAD_TEMP_DIR:var/user-stand-uploads}
+  system-tasks:
+    enabled: ${PEP_SYSTEM_TASKS_ENABLED:false}
+    poll-interval-ms: ${PEP_SYSTEM_TASKS_POLL_INTERVAL_MS:3000}
+    host-address: ${PEP_SYSTEM_TASKS_HOST_ADDRESS:host.docker.internal}
+    local-registry: ${PEP_SYSTEM_TASKS_LOCAL_REGISTRY:localhost:5001}
+    command-timeout-seconds: ${PEP_SYSTEM_TASKS_COMMAND_TIMEOUT_SECONDS:300}
+    max-archive-bytes: ${PEP_SYSTEM_TASKS_MAX_ARCHIVE_BYTES:524288000}
+    max-image-bytes: ${PEP_SYSTEM_TASKS_MAX_IMAGE_BYTES:10737418240}
+    health-attempts: ${PEP_SYSTEM_TASKS_HEALTH_ATTEMPTS:30}
+    health-interval-ms: ${PEP_SYSTEM_TASKS_HEALTH_INTERVAL_MS:1000}
+    upload-temp-dir: ${PEP_SYSTEM_TASKS_UPLOAD_TEMP_DIR:var/system-task-uploads}

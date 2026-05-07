@@ -62,18 +62,6 @@ class CorePlatformControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.position").value(1));
 
-        mockMvc.perform(post("/api/lessons/{lessonId}/complete", lessonId)
-                        .with(httpBasic("student1@pep.local", "student")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.lessonId").value(lessonId))
-                .andExpect(jsonPath("$.completed").value(true));
-
-        mockMvc.perform(get("/api/modules/{moduleId}/lesson-progress", moduleId)
-                        .with(httpBasic("student1@pep.local", "student")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].lessonId").value(lessonId));
-
         MvcResult submissionResult = mockMvc.perform(post("/api/submissions")
                         .with(httpBasic("student1@pep.local", "student"))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -200,14 +188,6 @@ class CorePlatformControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
 
-        mockMvc.perform(get("/api/modules/{moduleId}/result", moduleId)
-                        .with(httpBasic("student1@pep.local", "student")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.dockerPassed").value(true))
-                .andExpect(jsonPath("$.whiteBoxScore").value(90))
-                .andExpect(jsonPath("$.blackBoxScore").value(nullValue()))
-                .andExpect(jsonPath("$.status").value("IN_PROGRESS"));
-
         MvcResult labResult = mockMvc.perform(post("/api/labs")
                         .with(httpBasic("admin@pep.local", "admin"))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -276,15 +256,6 @@ class CorePlatformControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.decision").value("APPROVED"));
 
-        mockMvc.perform(get("/api/modules/{moduleId}/result", moduleId)
-                        .with(httpBasic("student2@pep.local", "student")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.dockerPassed").value(false))
-                .andExpect(jsonPath("$.whiteBoxScore").value(nullValue()))
-                .andExpect(jsonPath("$.blackBoxScore").value(80))
-                .andExpect(jsonPath("$.finalScore").value(nullValue()))
-                .andExpect(jsonPath("$.status").value("DOCKER_REQUIRED"));
-
         mockMvc.perform(get("/api/modules/{moduleId}/grades/export", moduleId)
                         .with(httpBasic("curator@pep.local", "curator")))
                 .andExpect(status().isOk())
@@ -305,6 +276,16 @@ class CorePlatformControllerTest {
         mockMvc.perform(get("/api/audit")
                         .with(httpBasic("admin@pep.local", "admin")))
                 .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/pentest-tasks")
+                        .with(httpBasic("student1@pep.local", "student")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+
+        mockMvc.perform(get("/api/pentest-task-instances/my")
+                        .with(httpBasic("student1@pep.local", "student")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
     }
 
     private String firstModuleIdFromLargestCourse(JsonNode courses) {

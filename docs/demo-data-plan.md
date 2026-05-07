@@ -20,15 +20,23 @@ production-ready окружении.
 
 ## Учебные данные
 
-- Курс: `OWASP Top 10` с модулями `A01`-`A10`.
-- Вводный модуль: `Docker intro`.
-- Основной демонстрационный практический модуль: `A03. Injection`.
-- Основная тема: SQL Injection.
-- Остальные OWASP модули содержат базовые уроки: теория/scope, white box lab guidance,
-  black box checklist.
+- Курс: `Вводный курс по Docker`.
+- Курс: `Академия веб-безопасности`.
+- Модули Академии: SQL-инъекции, межсайтовое выполнение сценариев, инъекция в серверные шаблоны,
+  подделка серверных запросов, межсайтовая подделка запроса, ошибки настройки CORS, внешние сущности
+  XML, уязвимости бизнес-логики, нарушение управления доступом, небезопасные прямые ссылки на объекты.
+- Старые demo-курсы `OWASP Top 10` и `Web Security Academy` архивируются, если они есть в БД.
 - Дедлайны: учебные значения, достаточные для прохождения demo flow за один запуск.
 
-## Docker images
+## Стенды
+
+Основной сценарий:
+
+- студент загружает архив проекта с `Dockerfile` или `docker-compose.yml`;
+- validation worker собирает image и публикует его в local registry;
+- администратор запускает lab instance или студент запускает официальный системный стенд.
+
+Fallback image:
 
 Валидный image:
 
@@ -64,18 +72,36 @@ Black box отчет должен содержать:
 
 Для демонстрации нужны события:
 
-- `USER_LOGIN`;
-- `COURSE_CREATED`;
+- `AUTH_LOGIN_SUCCESS`;
+- `COURSE_UPSERTED`;
 - `SUBMISSION_CREATED`;
+- `SUBMISSION_ARCHIVE_UPLOADED`;
 - `VALIDATION_JOB_PASSED`;
-- `WHITE_BOX_REVIEW_APPROVED`;
-- `LAB_STARTED`;
-- `BLACK_BOX_DISTRIBUTION_STARTED`;
-- `BLACK_BOX_REPORT_SUBMITTED`;
-- `REVIEW_SCORE_ASSIGNED`.
+- `REVIEW_COMPLETED`;
+- `LAB_CREATED`;
+- `BLACK_BOX_DISTRIBUTION_COMPLETED`;
+- `REPORT_SUBMITTED`;
+- `LESSON_UPSERTED`;
+- `ADMIN_USER_CREATED`.
+
+## Данные системных задач
+
+Для official pentest стендов подготовьте метаданные задачи (`slug`, категория, сложность, entrypoint, описание) и runtime-образ, например:
+
+```text
+title: SQL Injection Basic Lab
+slug: sqli-basic
+category: SQL-инъекции
+difficulty: beginner
+durationMinutes: 240
+entrypointPort: 8080
+healthPath: /health
+composeService: web
+description: Найдите SQL-инъекцию в форме входа.
+```
 
 ## Acceptance criteria
 
 - Demo data можно создать без ручного редактирования БД.
 - Данные не содержат реальных персональных данных.
-- Demo flow проходит от входа администратора до оценки black box отчета.
+- Demo flow проходит от входа администратора до оценки black box отчета и запуска системного стенда.
