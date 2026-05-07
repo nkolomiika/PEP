@@ -5,12 +5,21 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,7 +32,6 @@ import ru.pep.platform.domain.Course;
 import ru.pep.platform.domain.CourseStatus;
 import ru.pep.platform.domain.LearningModule;
 import ru.pep.platform.domain.Lesson;
-import ru.pep.platform.domain.LessonProgress;
 import ru.pep.platform.domain.LabStatus;
 import ru.pep.platform.domain.ModuleStatus;
 import ru.pep.platform.domain.Report;
@@ -44,7 +52,6 @@ import ru.pep.platform.repository.BlackBoxAssignmentRepository;
 import ru.pep.platform.repository.CourseRepository;
 import ru.pep.platform.repository.LabInstanceRepository;
 import ru.pep.platform.repository.LearningModuleRepository;
-import ru.pep.platform.repository.LessonProgressRepository;
 import ru.pep.platform.repository.LessonRepository;
 import ru.pep.platform.repository.ReportAttachmentRepository;
 import ru.pep.platform.repository.ReportRepository;
@@ -85,12 +92,13 @@ public class CorePlatformService {
     private final LabInstanceRepository labs;
     private final BlackBoxAssignmentRepository assignments;
     private final LessonRepository lessons;
-    private final LessonProgressRepository lessonProgress;
     private final ReportAttachmentRepository reportAttachments;
     private final AuditService audit;
+    private final StudentStreamService streams;
     private final PasswordEncoder passwordEncoder;
     private final Path attachmentStorageDirectory;
     private final Path archiveStorageDirectory;
+    private final Path avatarStorageDirectory;
 
     public CorePlatformService(
             AppUserRepository users,
@@ -104,12 +112,13 @@ public class CorePlatformService {
             LabInstanceRepository labs,
             BlackBoxAssignmentRepository assignments,
             LessonRepository lessons,
-            LessonProgressRepository lessonProgress,
             ReportAttachmentRepository reportAttachments,
             AuditService audit,
+            StudentStreamService streams,
             PasswordEncoder passwordEncoder,
             @Value("${pep.attachments.storage-dir:var/report-attachments}") String attachmentStorageDirectory,
-            @Value("${pep.submissions.archive-storage-dir:var/submission-archives}") String archiveStorageDirectory) {
+            @Value("${pep.submissions.archive-storage-dir:var/submission-archives}") String archiveStorageDirectory,
+            @Value("${pep.avatar.storage-dir:var/avatars}") String avatarStorageDirectory) {
         this.users = users;
         this.authSessions = authSessions;
         this.courses = courses;
@@ -121,31 +130,141 @@ public class CorePlatformService {
         this.labs = labs;
         this.assignments = assignments;
         this.lessons = lessons;
-        this.lessonProgress = lessonProgress;
         this.reportAttachments = reportAttachments;
         this.audit = audit;
+        this.streams = streams;
         this.passwordEncoder = passwordEncoder;
         this.attachmentStorageDirectory = Path.of(attachmentStorageDirectory).toAbsolutePath().normalize();
         this.archiveStorageDirectory = Path.of(archiveStorageDirectory).toAbsolutePath().normalize();
+        this.avatarStorageDirectory = Path.of(avatarStorageDirectory).toAbsolutePath().normalize();
     }
 
     @Transactional(readOnly = true)
-    public List<CoreDtos.CourseResponse> listCourses() {
+    public List<CoreDtos.CourseResponse> listCourses(String principalEmail) {
+        AppUser actor = principalEmail == null ? null : users.findByEmail(principalEmail).orElse(null);
+        boolean isStudent = actor != null && actor.getRole() == Role.STUDENT;
+        java.util.Set<UUID> accessibleCourseIds = isStudent
+                ? streams.accessibleCourseIds(actor)
+                : null;
+        AppUser viewerForSchedule = isStudent ? actor : null;
         return courses.findAll().stream()
                 .filter(course -> course.getStatus() == ru.pep.platform.domain.CourseStatus.PUBLISHED)
-                .map(this::toCourseResponse)
+                .filter(course -> accessibleCourseIds == null || accessibleCourseIds.contains(course.getId()))
+                .map(course -> toCourseResponse(course, viewerForSchedule))
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public CoreDtos.CurrentUserResponse currentUserProfile(String email) {
         AppUser user = currentUser(email);
-        return new CoreDtos.CurrentUserResponse(user.getEmail(), user.getDisplayName(), user.getRole());
+        return toUserResponse(user);
+    }
+
+    public CoreDtos.CurrentUserResponse toUserResponse(AppUser user) {
+        String avatarUrl = (user.getAvatarStorageKey() == null || user.getAvatarStorageKey().isBlank())
+                ? null
+                : "/api/me/avatar?v=" + user.getUpdatedAt().toInstant().toEpochMilli();
+        return new CoreDtos.CurrentUserResponse(
+                user.getEmail(), user.getDisplayName(), user.getRole(), avatarUrl);
+    }
+
+    @Transactional
+    public CoreDtos.CurrentUserResponse updateProfile(String principalEmail, CoreDtos.UpdateProfileRequest request) {
+        AppUser user = currentUser(principalEmail);
+        if (request.displayName() != null && !request.displayName().isBlank()) {
+            user.applyDisplayName(request.displayName().trim());
+        }
+        if (request.email() != null && !request.email().isBlank()) {
+            String email = request.email().trim().toLowerCase(Locale.ROOT);
+            if (!email.equals(user.getEmail())) {
+                Optional<AppUser> other = users.findByEmail(email);
+                if (other.isPresent() && !other.get().getId().equals(user.getId())) {
+                    throw new ValidationException("Пользователь с таким email уже существует");
+                }
+            }
+            user.applyEmail(email);
+        }
+        audit.record(user, "PROFILE_UPDATED", "AppUser", user.getId(), "{}");
+        return toUserResponse(users.save(user));
+    }
+
+    @Transactional
+    public void changePassword(String principalEmail, CoreDtos.ChangePasswordRequest request) {
+        AppUser user = currentUser(principalEmail);
+        if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+            throw new ValidationException("Неверный текущий пароль");
+        }
+        user.applyPasswordHash(passwordEncoder.encode(request.newPassword()));
+        audit.record(user, "PASSWORD_CHANGED", "AppUser", user.getId(), "{}");
+    }
+
+    @Transactional
+    public CoreDtos.CurrentUserResponse uploadAvatar(String principalEmail, MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new ValidationException("Файл не передан");
+        }
+        String ct = file.getContentType();
+        if (ct == null || !ct.startsWith("image/")) {
+            throw new ValidationException("Разрешены только изображения");
+        }
+        if (file.getSize() > 512 * 1024) {
+            throw new ValidationException("Файл больше 512 КБ");
+        }
+        String ext = switch (ct) {
+            case "image/png" -> ".png";
+            case "image/webp" -> ".webp";
+            case "image/jpeg" -> ".jpg";
+            default -> throw new ValidationException("Формат: PNG, JPEG или WebP");
+        };
+        AppUser user = currentUser(principalEmail);
+        String key = user.getId() + ext;
+        try {
+            Files.createDirectories(avatarStorageDirectory);
+            Path target = avatarStorageDirectory.resolve(key);
+            Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException exception) {
+            throw new IllegalStateException("Не удалось сохранить аватар", exception);
+        }
+        user.setAvatarStorageKey(key);
+        AppUser saved = users.save(user);
+        audit.record(user, "AVATAR_UPDATED", "AppUser", user.getId(), "{}");
+        return toUserResponse(saved);
     }
 
     @Transactional(readOnly = true)
-    public List<CoreDtos.AdminUserResponse> listUsers() {
-        return users.findAll().stream().map(this::toAdminUserResponse).toList();
+    public ResponseEntity<Resource> avatarResource(String principalEmail) {
+        AppUser user = currentUser(principalEmail);
+        String key = user.getAvatarStorageKey();
+        if (key == null || key.isBlank()) {
+            return ResponseEntity.notFound().build();
+        }
+        Path path = avatarStorageDirectory.resolve(key).normalize();
+        if (!path.startsWith(avatarStorageDirectory) || !Files.isRegularFile(path)) {
+            return ResponseEntity.notFound().build();
+        }
+        Resource body = new FileSystemResource(path);
+        MediaType mediaType = key.endsWith(".png")
+                ? MediaType.IMAGE_PNG
+                : key.endsWith(".webp") ? MediaType.valueOf("image/webp") : MediaType.IMAGE_JPEG;
+        return ResponseEntity.ok()
+                .contentType(mediaType)
+                .cacheControl(CacheControl.maxAge(Duration.ofHours(1)))
+                .body(body);
+    }
+
+    @Transactional(readOnly = true)
+    public CoreDtos.PageResponse<CoreDtos.AdminUserResponse> listUsers(String query, int page, int size) {
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(size, 100));
+        String normalizedQuery = query == null || query.isBlank() ? "" : query.trim();
+        Page<CoreDtos.AdminUserResponse> result = users.search(normalizedQuery, PageRequest.of(safePage, safeSize))
+                .map(this::toAdminUserResponse);
+        return new CoreDtos.PageResponse<>(
+                result.getContent(),
+                result.getNumber(),
+                result.getSize(),
+                result.getTotalElements(),
+                result.getTotalPages());
     }
 
     @Transactional
@@ -164,11 +283,56 @@ public class CorePlatformService {
     }
 
     @Transactional
+    public CoreDtos.AdminUserResponse updateUser(UUID userId, CoreDtos.UpdateUserRequest request) {
+        AppUser user = users.findById(userId)
+                .orElseThrow(() -> new NotFoundException("Пользователь не найден"));
+        String email = request.email() == null || request.email().isBlank()
+                ? user.getEmail()
+                : request.email().trim().toLowerCase(Locale.ROOT);
+        if (!email.equals(user.getEmail())) {
+            users.findByEmail(email).ifPresent(existing -> {
+                if (!existing.getId().equals(user.getId())) {
+                    throw new ValidationException("Пользователь с таким email уже существует");
+                }
+            });
+        }
+        String displayName = request.displayName() == null || request.displayName().isBlank()
+                ? user.getDisplayName()
+                : request.displayName().trim();
+        Role role = request.role() == null ? user.getRole() : request.role();
+        UserStatus status = request.status() == null ? user.getStatus() : request.status();
+        user.updateAdminProfile(email, displayName, role, status);
+        audit.record(user, "ADMIN_USER_UPDATED", "AppUser", user.getId(), "{}");
+        return toAdminUserResponse(users.save(user));
+    }
+
+    @Transactional
     public void disableUser(UUID userId) {
         AppUser user = users.findById(userId)
                 .orElseThrow(() -> new NotFoundException("Пользователь не найден"));
         user.disable();
         audit.record(user, "ADMIN_USER_DISABLED", "AppUser", user.getId(), "{}");
+    }
+
+    @Transactional
+    public void disableUsers(List<UUID> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            throw new ValidationException("Не выбраны пользователи");
+        }
+        userIds.forEach(this::disableUser);
+    }
+
+    @Transactional
+    public void deleteUsers(List<UUID> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            throw new ValidationException("Не выбраны пользователи");
+        }
+        for (UUID userId : userIds) {
+            AppUser user = users.findById(userId)
+                    .orElseThrow(() -> new NotFoundException("Пользователь не найден"));
+            audit.record(user, "ADMIN_USER_DELETED", "AppUser", user.getId(), "{}");
+            users.delete(user);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -256,35 +420,6 @@ public class CorePlatformService {
                 .filter(Lesson::getPublished)
                 .orElseThrow(() -> new NotFoundException("Урок не найден"));
         return toLessonResponse(lesson);
-    }
-
-    @Transactional(readOnly = true)
-    public List<CoreDtos.LessonProgressResponse> listLessonProgress(String email, UUID moduleId) {
-        AppUser student = currentUser(email);
-        if (student.getRole() != Role.STUDENT) {
-            throw new AccessDeniedException("Progress доступен только студенту");
-        }
-        if (!modules.existsById(moduleId)) {
-            throw new NotFoundException("Модуль не найден");
-        }
-        return lessonProgress.findModuleProgress(student.getId(), moduleId).stream()
-                .map(this::toLessonProgressResponse)
-                .toList();
-    }
-
-    @Transactional
-    public CoreDtos.LessonProgressResponse completeLesson(String email, UUID lessonId) {
-        AppUser student = currentUser(email);
-        if (student.getRole() != Role.STUDENT) {
-            throw new AccessDeniedException("Только студент может отмечать уроки");
-        }
-        Lesson lesson = lessons.findById(lessonId)
-                .filter(Lesson::getPublished)
-                .orElseThrow(() -> new NotFoundException("Урок не найден"));
-        LessonProgress progress = lessonProgress.findByStudentAndLesson(student, lesson)
-                .orElseGet(() -> lessonProgress.save(new LessonProgress(student, lesson)));
-        audit.record(student, "LESSON_COMPLETED", "Lesson", lesson.getId(), "{}");
-        return toLessonProgressResponse(progress);
     }
 
     @Transactional
@@ -519,25 +654,6 @@ public class CorePlatformService {
     }
 
     @Transactional(readOnly = true)
-    public CoreDtos.ModuleResultResponse getModuleResult(String email, UUID moduleId) {
-        AppUser student = currentUser(email);
-        if (student.getRole() != Role.STUDENT) {
-            throw new AccessDeniedException("Итог модуля доступен только студенту");
-        }
-        if (!modules.existsById(moduleId)) {
-            throw new NotFoundException("Модуль не найден");
-        }
-        ModuleResult result = calculateModuleResult(student, moduleId);
-        return new CoreDtos.ModuleResultResponse(
-                moduleId,
-                result.dockerPassed(),
-                result.whiteBoxScore(),
-                result.blackBoxScore(),
-                result.finalScore(),
-                result.status());
-    }
-
-    @Transactional(readOnly = true)
     public String exportModuleGradesCsv(String email, UUID moduleId) {
         AppUser actor = currentUser(email);
         if (actor.getRole() == Role.STUDENT) {
@@ -597,6 +713,9 @@ public class CorePlatformService {
         List<LabInstance> moduleLabs = labs.findBySubmissionModuleId(moduleId);
         List<AppUser> students = users.findAll().stream()
                 .filter(user -> user.getRole() == Role.STUDENT)
+                .filter(user -> user.getStatus() == UserStatus.ACTIVE)
+                .filter(user -> streams.canStudentAccessModule(user, moduleId)
+                        || streams.activeStreamIds(user).isEmpty())
                 .toList();
         int created = 0;
         for (AppUser student : students) {
@@ -827,22 +946,37 @@ public class CorePlatformService {
     }
 
     private CoreDtos.CourseResponse toCourseResponse(Course course) {
+        return toCourseResponse(course, null);
+    }
+
+    private CoreDtos.CourseResponse toCourseResponse(Course course, AppUser viewerForSchedule) {
         return new CoreDtos.CourseResponse(
                 course.getId(),
                 course.getTitle(),
                 course.getDescription(),
                 course.getStatus(),
                 course.getModules().stream()
-                        .map(this::toModuleResponse)
+                        .map(module -> toModuleResponse(module, viewerForSchedule))
                         .toList());
     }
 
     private CoreDtos.ModuleResponse toModuleResponse(LearningModule module) {
+        return toModuleResponse(module, null);
+    }
+
+    private CoreDtos.ModuleResponse toModuleResponse(LearningModule module, AppUser viewerForSchedule) {
+        StudentStreamService.EffectiveSchedule schedule = viewerForSchedule == null
+                ? StudentStreamService.EffectiveSchedule.EMPTY
+                : streams.effectiveScheduleFor(viewerForSchedule, module.getId());
         return new CoreDtos.ModuleResponse(
                 module.getId(),
                 module.getTitle(),
                 module.getVulnerabilityTopic(),
-                module.getStatus());
+                module.getStatus(),
+                schedule.startsAt(),
+                schedule.submissionDeadline(),
+                schedule.blackBoxStartsAt(),
+                schedule.blackBoxDeadline());
     }
 
     private CoreDtos.LessonResponse toLessonResponse(Lesson lesson) {
@@ -879,13 +1013,6 @@ public class CorePlatformService {
                 submission.getApplicationPort(),
                 submission.getHealthPath(),
                 submission.getStatus());
-    }
-
-    private CoreDtos.LessonProgressResponse toLessonProgressResponse(LessonProgress progress) {
-        return new CoreDtos.LessonProgressResponse(
-                progress.getLesson().getId(),
-                true,
-                progress.getCompletedAt());
     }
 
     private CoreDtos.ValidationJobResponse toValidationJobResponse(ValidationJob job) {
